@@ -1,0 +1,25 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+publish/
+artifacts/
+
+# Rider / VS / VS Code
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# NuGet
+*.nupkg
+packages/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Release artifacts
+*.zip
+checksum.txt
+

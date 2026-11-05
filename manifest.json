@@ -1,0 +1,12 @@
+[
+  {
+    "guid": "8f3a1c2e-9b4d-4c6a-8e2f-7d1b5a9c3e4f",
+    "name": "Jellyfin to Jellyfin",
+    "description": "Mirrors remote Jellyfin libraries into local .strm trees and proxies playback, without downloading media.",
+    "overview": "Point this plugin at one or more remote Jellyfin servers and it writes .strm/.nfo files plus artwork into a path your own server can index, then streams the original file through the local server so your users can browse and play remote content from your own libraries.",
+    "owner": "Lowitle",
+    "category": "General",
+    "imageUrl": "",
+    "versions": []
+  }
+]

@@ -1,0 +1,559 @@
+<div id="JellyfinToJellyfinConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
+    <div data-role="content">
+        <div class="content-primary">
+            <div class="sectionTitleContainer flex align-items-center">
+                <h2 class="sectionTitle">Jellyfin to Jellyfin</h2>
+            </div>
+            <p class="fieldDescription">
+                Mirrors remote Jellyfin libraries as .strm/.nfo/artwork and streams playback through this server.
+                The remote API key never leaves the server: generated .strm files only contain this server's stream endpoint.
+            </p>
+
+            <div class="verticalSection">
+                <h3 class="sectionTitle">General</h3>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="defaultBasePath">Base output folder</label>
+                    <input id="defaultBasePath" type="text" is="emby-input" />
+                    <div class="fieldDescription">Each instance writes into &lt;base&gt;/JellyfinToJellyfin/&lt;instance id&gt;/ unless the instance sets its own output folder.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="serverUrlOverride">Local server URL used inside .strm files</label>
+                    <input id="serverUrlOverride" type="text" is="emby-input" placeholder="http://192.168.1.10:8096" />
+                    <div class="fieldDescription">Leave empty to auto-detect. Set it explicitly if clients must reach this server on a fixed address.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="scheduleIntervalHours">Scheduled sync interval (hours)</label>
+                    <input id="scheduleIntervalHours" type="number" min="0" step="1" is="emby-input" />
+                    <div class="fieldDescription">0 disables the scheduled task. Trigger changes apply after a server restart.</div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input id="syncOnStartup" type="checkbox" is="emby-checkbox" />
+                        <span>Run a sync when the server starts</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="verticalSection">
+                <h3 class="sectionTitle">Remote instances</h3>
+                <div id="instances"></div>
+                <datalist id="localLibraryNames"></datalist>
+                <br />
+                <button id="addInstance" is="emby-button" type="button" class="raised block"><span>Add instance</span></button>
+            </div>
+
+            <div class="verticalSection">
+                <h3 class="sectionTitle">Actions</h3>
+                <button id="saveConfig" is="emby-button" type="button" class="raised button-submit"><span>Save</span></button>
+                <button id="syncNow" is="emby-button" type="button" class="raised"><span>Sync now</span></button>
+                <button id="refreshStatus" is="emby-button" type="button" class="raised"><span>Refresh status</span></button>
+                <div id="statusArea" style="margin-top:1em;white-space:pre-wrap;font-family:monospace;font-size:0.9em;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            'use strict';
+
+            var COLLECTION_TYPES = ['', 'movies', 'tvshows', 'music', 'musicvideos', 'homevideos', 'boxsets', 'books', 'mixed'];
+            var state = { config: null, remote: {}, localLibraries: [], pollTimer: null };
+
+            function el(id) {
+                return document.getElementById(id);
+            }
+
+            function apiUrl(path) {
+                return ApiClient.getUrl('JellyfinToJellyfin/api/' + path);
+            }
+
+            function attr(value) {
+                return String(value === null || value === undefined ? '' : value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            function setStatus(message) {
+                el('statusArea').textContent = message;
+            }
+
+            function newInstance() {
+                return {
+                    Id: 'inst' + Math.random().toString(36).slice(2, 8),
+                    Name: '',
+                    BaseUrl: '',
+                    ApiKey: '',
+                    BasePath: '',
+                    LocalServerUrl: '',
+                    Enabled: true,
+                    DownloadImages: true,
+                    Libraries: [],
+                    LastSyncUtc: null,
+                    LastSyncStatus: ''
+                };
+            }
+
+            function newMapping() {
+                return {
+                    RemoteLibraryId: '',
+                    RemoteLibraryName: '',
+                    RemoteCollectionType: '',
+                    Enabled: true,
+                    FolderName: '',
+                    TargetLibraryName: '',
+                    TargetCollectionType: '',
+                    CreateNewLibrary: true,
+                    TargetLibraryId: ''
+                };
+            }
+
+            function normalize(config) {
+                var result = config || {};
+                result.DefaultBasePath = result.DefaultBasePath || '';
+                result.ServerUrlOverride = result.ServerUrlOverride || '';
+                result.SyncOnStartup = !!result.SyncOnStartup;
+                result.ScheduleIntervalHours = result.ScheduleIntervalHours || 0;
+                result.Instances = result.Instances || [];
+                result.Instances.forEach(function (instance) {
+                    instance.Libraries = instance.Libraries || [];
+                });
+                return result;
+            }
+
+            function loadConfig() {
+                return ApiClient.getJSON(apiUrl('config')).then(function (config) {
+                    state.config = normalize(config);
+                    renderGeneral();
+                    renderInstances();
+                    setStatus('Configuration loaded.');
+                });
+            }
+
+            function renderGeneral() {
+                el('defaultBasePath').value = state.config.DefaultBasePath || '';
+                el('serverUrlOverride').value = state.config.ServerUrlOverride || '';
+                el('scheduleIntervalHours').value = state.config.ScheduleIntervalHours || 0;
+                el('syncOnStartup').checked = !!state.config.SyncOnStartup;
+            }
+
+            function renderInstances() {
+                var html = '';
+                state.config.Instances.forEach(function (instance, index) {
+                    html += instanceCard(instance, index);
+                });
+                if (!html) {
+                    html = '<p class="fieldDescription">No remote instances configured yet.</p>';
+                }
+                el('instances').innerHTML = html;
+            }
+
+            function statusLine(instance) {
+                var parts = [];
+                if (instance.LastSyncUtc) {
+                    parts.push('Last sync: ' + instance.LastSyncUtc);
+                }
+                if (instance.LastSyncStatus) {
+                    parts.push(instance.LastSyncStatus);
+                }
+                return parts.length ? parts.join(' - ') : 'Never synced.';
+            }
+
+            function collectionOptions(current) {
+                var html = '';
+                COLLECTION_TYPES.forEach(function (type) {
+                    html += '<option value="' + attr(type) + '"' + (type === (current || '') ? ' selected' : '') + '>'
+                        + attr(type || '(auto)') + '</option>';
+                });
+                return html;
+            }
+
+            function remoteOptions(mapping, instance) {
+                var html = '<option value="">(select a remote library)</option>';
+                var seen = false;
+                var libraries = state.remote[instance.Id] || [];
+                libraries.forEach(function (library) {
+                    var selected = library.name === mapping.RemoteLibraryName;
+                    if (selected) {
+                        seen = true;
+                    }
+                    html += '<option value="' + attr(library.name) + '" data-id="' + attr(library.itemId)
+                        + '" data-type="' + attr(library.collectionType) + '"' + (selected ? ' selected' : '') + '>'
+                        + attr(library.name) + ' (' + attr(library.collectionType) + ')</option>';
+                });
+                if (!seen && mapping.RemoteLibraryName) {
+                    html += '<option value="' + attr(mapping.RemoteLibraryName) + '" data-id="' + attr(mapping.RemoteLibraryId)
+                        + '" data-type="' + attr(mapping.RemoteCollectionType) + '" selected>' + attr(mapping.RemoteLibraryName) + '</option>';
+                }
+                return html;
+            }
+
+            function mappingRow(mapping, instance) {
+                var html = '<tr class="mapping-row">';
+                html += '<td><input type="checkbox" is="emby-checkbox" data-field="Enabled"' + (mapping.Enabled ? ' checked' : '') + ' /></td>';
+                html += '<td><select is="emby-select" data-field="RemoteLibraryName">' + remoteOptions(mapping, instance) + '</select>';
+                html += '<input type="hidden" data-field="RemoteLibraryId" value="' + attr(mapping.RemoteLibraryId) + '" />';
+                html += '<input type="hidden" data-field="RemoteCollectionType" value="' + attr(mapping.RemoteCollectionType) + '" />';
+                html += '<input type="hidden" data-field="TargetLibraryId" value="' + attr(mapping.TargetLibraryId) + '" />';
+                html += '<input type="hidden" data-field="CreateNewLibrary" value="' + (mapping.CreateNewLibrary === false ? 'false' : 'true') + '" /></td>';
+                html += '<td><input type="text" is="emby-input" data-field="FolderName" value="' + attr(mapping.FolderName) + '" placeholder="auto" /></td>';
+                html += '<td><input type="text" is="emby-input" list="localLibraryNames" data-field="TargetLibraryName" value="' + attr(mapping.TargetLibraryName) + '" /></td>';
+                html += '<td><select is="emby-select" data-field="TargetCollectionType">' + collectionOptions(mapping.TargetCollectionType) + '</select></td>';
+                html += '<td><button type="button" is="emby-button" class="raised" data-action="remove-mapping"><span>Remove</span></button></td>';
+                html += '</tr>';
+                return html;
+            }
+
+            function textField(field, label, value, placeholder, type) {
+                return '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">' + attr(label) + '</label>'
+                    + '<input type="' + (type || 'text') + '" is="emby-input" data-field="' + attr(field) + '" value="' + attr(value)
+                    + '" placeholder="' + attr(placeholder) + '" /></div>';
+            }
+
+            function instanceCard(instance, index) {
+                var html = '<div class="instance-card" data-index="' + index + '" data-instance-id="' + attr(instance.Id)
+                    + '" data-last-sync="' + attr(instance.LastSyncUtc) + '" data-last-status="' + attr(instance.LastSyncStatus) + '"'
+                    + ' style="border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:0.8em;margin-bottom:1em;">';
+                html += '<div class="flex align-items-center justify-content-between">';
+                html += '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" data-field="Enabled"'
+                    + (instance.Enabled ? ' checked' : '') + ' /><span>Enabled</span></label>';
+                html += '<button type="button" is="emby-button" class="raised" data-action="remove-instance"><span>Remove instance</span></button>';
+                html += '</div>';
+                html += textField('Name', 'Name', instance.Name, 'Remote server');
+                html += textField('Id', 'Instance id', instance.Id, '');
+                html += textField('BaseUrl', 'Remote base URL', instance.BaseUrl, 'https://remote.example.com');
+                html += textField('ApiKey', 'Remote API key', instance.ApiKey, '', 'password');
+                html += textField('BasePath', 'Output folder (optional)', instance.BasePath, 'uses the global base folder');
+                html += textField('LocalServerUrl', 'Local server URL for .strm (optional)', instance.LocalServerUrl, 'auto-detected');
+                html += '<div class="checkboxContainer"><label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" data-field="DownloadImages"'
+                    + (instance.DownloadImages ? ' checked' : '') + ' /><span>Download artwork</span></label></div>';
+                html += '<div class="flex align-items-center" style="gap:0.5em;margin:0.5em 0;">';
+                html += '<button type="button" is="emby-button" class="raised" data-action="test-instance"><span>Test connection</span></button>';
+                html += '<button type="button" is="emby-button" class="raised" data-action="load-libraries"><span>Load remote libraries</span></button>';
+                html += '</div>';
+                html += '<h4 class="sectionTitle">Library mappings</h4>';
+                html += '<table style="width:100%;"><thead><tr><th>On</th><th>Remote library</th><th>Folder</th><th>Local library</th><th>Type</th><th></th></tr></thead><tbody class="mappings">';
+                instance.Libraries.forEach(function (mapping) {
+                    html += mappingRow(mapping, instance);
+                });
+                html += '</tbody></table>';
+                html += '<button type="button" is="emby-button" class="raised" data-action="add-mapping"><span>Add mapping</span></button>';
+                html += '<div class="fieldDescription instance-status">' + attr(statusLine(instance)) + '</div>';
+                html += '</div>';
+                return html;
+            }
+
+            function cardField(card, field) {
+                var node = card.querySelector('[data-field="' + field + '"]');
+                return node && typeof node.value === 'string' ? node.value : '';
+            }
+
+            function cardChecked(card, field) {
+                var node = card.querySelector('[data-field="' + field + '"]');
+                return !!(node && node.checked);
+            }
+
+            function collectMapping(row) {
+                var select = row.querySelector('[data-field="RemoteLibraryName"]');
+                var option = select && select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+                return {
+                    Enabled: !!row.querySelector('[data-field="Enabled"]').checked,
+                    RemoteLibraryName: select ? select.value : '',
+                    RemoteLibraryId: (option && option.getAttribute('data-id')) || row.querySelector('[data-field="RemoteLibraryId"]').value || '',
+                    RemoteCollectionType: (option && option.getAttribute('data-type')) || row.querySelector('[data-field="RemoteCollectionType"]').value || '',
+                    FolderName: row.querySelector('[data-field="FolderName"]').value.trim(),
+                    TargetLibraryName: row.querySelector('[data-field="TargetLibraryName"]').value.trim(),
+                    TargetCollectionType: row.querySelector('[data-field="TargetCollectionType"]').value,
+                    TargetLibraryId: row.querySelector('[data-field="TargetLibraryId"]').value,
+                    CreateNewLibrary: row.querySelector('[data-field="CreateNewLibrary"]').value !== 'false'
+                };
+            }
+
+            function collectConfig() {
+                state.config.DefaultBasePath = el('defaultBasePath').value.trim();
+                state.config.ServerUrlOverride = el('serverUrlOverride').value.trim();
+                state.config.ScheduleIntervalHours = Number(el('scheduleIntervalHours').value) || 0;
+                state.config.SyncOnStartup = el('syncOnStartup').checked;
+
+                var instances = [];
+                var cards = document.querySelectorAll('#instances .instance-card');
+                for (var c = 0; c < cards.length; c++) {
+                    var card = cards[c];
+                    var instance = {
+                        Id: cardField(card, 'Id').trim(),
+                        Name: cardField(card, 'Name').trim(),
+                        BaseUrl: cardField(card, 'BaseUrl').trim(),
+                        ApiKey: cardField(card, 'ApiKey').trim(),
+                        BasePath: cardField(card, 'BasePath').trim(),
+                        LocalServerUrl: cardField(card, 'LocalServerUrl').trim(),
+                        Enabled: cardChecked(card, 'Enabled'),
+                        DownloadImages: cardChecked(card, 'DownloadImages'),
+                        LastSyncUtc: card.getAttribute('data-last-sync') || null,
+                        LastSyncStatus: card.getAttribute('data-last-status') || '',
+                        Libraries: []
+                    };
+
+                    var rows = card.querySelectorAll('tbody.mappings tr');
+                    for (var r = 0; r < rows.length; r++) {
+                        instance.Libraries.push(collectMapping(rows[r]));
+                    }
+
+                    instances.push(instance);
+                }
+
+                state.config.Instances = instances;
+                return state.config;
+            }
+
+            function instanceById(id) {
+                for (var i = 0; i < state.config.Instances.length; i++) {
+                    if (state.config.Instances[i].Id === id) {
+                        return state.config.Instances[i];
+                    }
+                }
+                return null;
+            }
+
+            function describeError(error) {
+                if (!error) {
+                    return 'unknown error';
+                }
+                if (typeof error === 'string') {
+                    return error;
+                }
+                return error.message || error.statusText || ('HTTP ' + error.status);
+            }
+
+            function saveConfig() {
+                var payload = collectConfig();
+                return ApiClient.ajax({
+                    type: 'POST',
+                    url: apiUrl('config'),
+                    data: JSON.stringify(payload),
+                    contentType: 'application/json'
+                }).then(function (saved) {
+                    state.config = normalize(saved && saved.Instances ? saved : payload);
+                    renderGeneral();
+                    renderInstances();
+                    return state.config;
+                });
+            }
+
+            function testConnection(card) {
+                var baseUrl = cardField(card, 'BaseUrl').trim();
+                var apiKey = cardField(card, 'ApiKey').trim();
+                if (!baseUrl) {
+                    setStatus('Enter a remote base URL first.');
+                    return;
+                }
+
+                setStatus('Testing ' + baseUrl + ' ...');
+                ApiClient.getJSON(apiUrl('test?baseUrl=' + encodeURIComponent(baseUrl) + '&apiKey=' + encodeURIComponent(apiKey)))
+                    .then(function (result) {
+                        if (result && result.ok) {
+                            setStatus('Connection OK: ' + result.serverName + ' (' + result.version + ')');
+                        } else {
+                            setStatus('Connection failed: ' + ((result && result.error) || 'unknown error'));
+                        }
+                    })
+                    .catch(function (error) {
+                        setStatus('Connection failed: ' + describeError(error));
+                    });
+            }
+
+            function loadRemoteLibraries(card) {
+                var baseUrl = cardField(card, 'BaseUrl').trim();
+                var apiKey = cardField(card, 'ApiKey').trim();
+                if (!baseUrl) {
+                    setStatus('Enter a remote base URL first.');
+                    return;
+                }
+
+                var instanceId = card.getAttribute('data-instance-id');
+                collectConfig();
+                setStatus('Loading remote libraries ...');
+
+                ApiClient.getJSON(apiUrl('libraries?baseUrl=' + encodeURIComponent(baseUrl) + '&apiKey=' + encodeURIComponent(apiKey)))
+                    .then(function (libraries) {
+                        if (!Array.isArray(libraries)) {
+                            setStatus('Could not load libraries: ' + ((libraries && libraries.error) || 'unknown error'));
+                            return;
+                        }
+
+                        state.remote[instanceId] = libraries;
+                        renderInstances();
+                        setStatus('Loaded ' + libraries.length + ' remote librar' + (libraries.length === 1 ? 'y' : 'ies') + '.');
+                    })
+                    .catch(function (error) {
+                        setStatus('Could not load libraries: ' + describeError(error));
+                    });
+            }
+
+            function loadLocalLibraries() {
+                ApiClient.getJSON(apiUrl('local-libraries'))
+                    .then(function (libraries) {
+                        state.localLibraries = libraries || [];
+                        var html = '';
+                        state.localLibraries.forEach(function (library) {
+                            html += '<option value="' + attr(library.name) + '"></option>';
+                        });
+                        el('localLibraryNames').innerHTML = html;
+                    })
+                    .catch(function () {
+                        // Non fatal: the local library field falls back to free text.
+                    });
+            }
+
+            function renderStatus(status) {
+                var lines = [];
+                lines.push('Sync running: ' + (status && status.isSyncing ? 'yes' : 'no'));
+
+                var report = status && status.lastReport;
+                if (report) {
+                    lines.push('Last run: ' + (report.success ? 'success' : 'failed')
+                        + ' in ' + report.durationSeconds + 's - '
+                        + report.librariesSynced + ' libraries, '
+                        + report.itemsSeen + ' items, '
+                        + report.strmWritten + ' strm, '
+                        + report.nfoWritten + ' nfo, '
+                        + report.imagesWritten + ' images, '
+                        + (report.duplicatesSkipped || 0) + ' duplicate path(s)');
+                    (report.errors || []).slice(0, 10).forEach(function (message) {
+                        lines.push('  error: ' + message);
+                    });
+                    (report.warnings || []).slice(0, 10).forEach(function (message) {
+                        lines.push('  warning: ' + message);
+                    });
+                }
+
+                ((status && status.instances) || []).forEach(function (instance) {
+                    lines.push('[' + (instance.name || instance.id) + '] '
+                        + (instance.lastSyncUtc || 'never') + ' ' + (instance.lastSyncStatus || ''));
+
+                    var card = document.querySelector('#instances .instance-card[data-instance-id="' + instance.id + '"]');
+                    if (card) {
+                        card.setAttribute('data-last-sync', instance.lastSyncUtc || '');
+                        card.setAttribute('data-last-status', instance.lastSyncStatus || '');
+                        var box = card.querySelector('.instance-status');
+                        if (box) {
+                            box.textContent = (instance.lastSyncUtc ? 'Last sync: ' + instance.lastSyncUtc + ' ' : 'Never synced. ')
+                                + (instance.lastSyncStatus || '');
+                        }
+                    }
+                });
+
+                setStatus(lines.join('\n'));
+            }
+
+            function pollStatus() {
+                if (state.pollTimer) {
+                    clearTimeout(state.pollTimer);
+                    state.pollTimer = null;
+                }
+
+                return ApiClient.getJSON(apiUrl('status'))
+                    .then(function (status) {
+                        renderStatus(status);
+                        if (status && status.isSyncing) {
+                            state.pollTimer = setTimeout(pollStatus, 3000);
+                        }
+                    })
+                    .catch(function () {
+                        // Status is best effort.
+                    });
+            }
+
+            function startSync() {
+                return saveConfig()
+                    .then(function () {
+                        return ApiClient.ajax({ type: 'POST', url: apiUrl('sync') });
+                    })
+                    .then(function () {
+                        setStatus('Sync started ...');
+                        return pollStatus();
+                    })
+                    .catch(function (error) {
+                        setStatus('Could not start sync: ' + describeError(error));
+                    });
+            }
+
+            function attachEvents() {
+                el('addInstance').addEventListener('click', function () {
+                    collectConfig();
+                    state.config.Instances.push(newInstance());
+                    renderInstances();
+                });
+
+                el('saveConfig').addEventListener('click', function () {
+                    setStatus('Saving ...');
+                    saveConfig()
+                        .then(function () {
+                            setStatus('Configuration saved.');
+                            return pollStatus();
+                        })
+                        .catch(function (error) {
+                            setStatus('Save failed: ' + describeError(error));
+                        });
+                });
+
+                el('syncNow').addEventListener('click', startSync);
+                el('refreshStatus').addEventListener('click', pollStatus);
+
+                el('instances').addEventListener('click', function (event) {
+                    var node = event.target;
+                    var root = el('instances');
+                    while (node && node !== root && !(node.getAttribute && node.getAttribute('data-action'))) {
+                        node = node.parentNode;
+                    }
+                    if (!node || node === root) {
+                        return;
+                    }
+
+                    var card = node.closest ? node.closest('.instance-card') : null;
+                    if (!card) {
+                        return;
+                    }
+
+                    var action = node.getAttribute('data-action');
+                    if (action === 'remove-instance') {
+                        collectConfig();
+                        var id = card.getAttribute('data-instance-id');
+                        state.config.Instances = state.config.Instances.filter(function (instance) {
+                            return instance.Id !== id;
+                        });
+                        renderInstances();
+                    } else if (action === 'add-mapping') {
+                        collectConfig();
+                        var instance = instanceById(card.getAttribute('data-instance-id'));
+                        if (instance) {
+                            instance.Libraries.push(newMapping());
+                            renderInstances();
+                        }
+                    } else if (action === 'remove-mapping') {
+                        var row = node.closest('tr');
+                        if (row && row.parentNode) {
+                            row.parentNode.removeChild(row);
+                        }
+                    } else if (action === 'test-instance') {
+                        testConnection(card);
+                    } else if (action === 'load-libraries') {
+                        loadRemoteLibraries(card);
+                    }
+                });
+            }
+
+            attachEvents();
+            loadLocalLibraries();
+            loadConfig()
+                .then(function () {
+                    return pollStatus();
+                })
+                .catch(function (error) {
+                    setStatus('Could not load configuration: ' + describeError(error));
+                });
+        })();
+
+    </script>
+</div>

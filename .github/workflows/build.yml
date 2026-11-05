@@ -1,0 +1,46 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # SDK 10 builds the net9.0 plugin and runs the net10.0 dev tools.
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore JellyfinToJellyfin.sln
+
+      - name: Build
+        run: dotnet build JellyfinToJellyfin.sln -c Release --no-restore
+
+      - name: Lint embedded configuration page
+        run: node tools/page-lint.js
+
+      - name: Offline smoke checks
+        run: dotnet run --project tools/ConfigCheck/ConfigCheck.csproj -c Release --no-build
+
+      - name: Upload plugin assembly
+        uses: actions/upload-artifact@v4
+        with:
+          name: JellyfinToJellyfin
+          path: JellyfinToJellyfin/bin/Release/net9.0/JellyfinToJellyfin.dll
+          if-no-files-found: error

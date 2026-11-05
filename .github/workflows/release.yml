@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (e.g. 0.1.0.0)
+        required: true
+      notes:
+        description: Changelog text for the manifest entry
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          echo "value=${version}" >> "$GITHUB_OUTPUT"
+          echo "archive=jellyfin-to-jellyfin-plugin_${version}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin
+        run: dotnet build JellyfinToJellyfin/JellyfinToJellyfin.csproj -c Release
+
+      - name: Package archive
+        run: |
+          set -euo pipefail
+          cd JellyfinToJellyfin/bin/Release/net9.0
+          zip -j "$GITHUB_WORKSPACE/${{ steps.version.outputs.archive }}" JellyfinToJellyfin.dll
+          cd "$GITHUB_WORKSPACE"
+          md5sum "${{ steps.version.outputs.archive }}" | cut -d' ' -f1 > checksum.txt
+          echo "checksum=$(cat checksum.txt)" >> "$GITHUB_OUTPUT"
+          ls -l "${{ steps.version.outputs.archive }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          notes="${NOTES:-Release $VERSION}"
+          gh release create "$TAG" "$ARCHIVE" \
+            --title "Jellyfin to Jellyfin $VERSION" \
+            --notes "$notes"
+
+      - name: Update manifest
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          REPO: ${{ github.repository }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          checksum="$(cat checksum.txt)"
+          if [ -n "${NOTES:-}" ]; then
+            node tools/update-manifest.js --version "$VERSION" --checksum "$checksum" --repo "$REPO" --notes "$NOTES"
+          else
+            node tools/update-manifest.js --version "$VERSION" --checksum "$checksum" --repo "$REPO"
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifest.json
+          git diff --cached --quiet || git commit -m "manifest: publish $VERSION"
+          git push origin HEAD:main
