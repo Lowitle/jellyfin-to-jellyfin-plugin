@@ -44,13 +44,21 @@ public class PathSanitizerTests
     }
 
     [Fact]
-    public void SamePath_IgnoresTrailingSeparatorsAndCase()
+    public void SamePath_IgnoresTrailingSeparators()
     {
         var dir = Path.Combine(Path.GetTempPath(), "j2j-same-path");
 
         Assert.True(PathSanitizer.SamePath(dir, dir + Path.DirectorySeparatorChar));
-        Assert.True(PathSanitizer.SamePath(dir, dir.ToUpperInvariant()));
         Assert.False(PathSanitizer.SamePath(dir, Path.Combine(Path.GetTempPath(), "j2j-other")));
+    }
+
+    [Fact]
+    public void SamePath_IsCaseInsensitiveOnlyOnWindows()
+    {
+        var lower = Path.Combine(Path.GetTempPath(), "j2j-same-path");
+        var upper = Path.Combine(Path.GetTempPath(), "J2J-SAME-PATH");
+
+        Assert.Equal(OperatingSystem.IsWindows(), PathSanitizer.SamePath(lower, upper));
     }
 
     [Fact]
