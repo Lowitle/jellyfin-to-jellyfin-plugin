@@ -177,6 +177,7 @@ proxy that the generated `.strm` files point at.
 
 ```
 JellyfinToJellyfin/         plugin (net9.0, Jellyfin.Controller/Model 10.11.6)
+tests/JellyfinToJellyfin.Tests/  xUnit tests for PathSanitizer, NfoBuilder and MirrorGenerator
 tools/ConfigCheck/          offline + live smoke tests (DTO round-trip, NFO, live /Items, mirror)
 tools/Inspect/              dumps the Jellyfin model shapes the DTOs must match
 tools/page-lint.js          static check of the embedded configuration page
@@ -185,6 +186,7 @@ tools/update-manifest.js    adds a version entry (with checksum) to manifest.jso
 
 ```powershell
 dotnet build .\JellyfinToJellyfin.sln -c Release
+dotnet test .\JellyfinToJellyfin.sln -c Release
 dotnet run --project .\tools\ConfigCheck\ConfigCheck.csproj            # offline checks
 node .\tools\page-lint.js                                              # config page lint
 ```
@@ -199,6 +201,18 @@ $env:J2J_MIRROR_DIR    = "$env:TEMP\j2j-mirror" # optional, writes a real mirror
 $env:J2J_DUMP_DIR      = "$env:TEMP\j2j-dump"   # optional, dumps the /Items JSON
 dotnet run --project .\tools\ConfigCheck\ConfigCheck.csproj -- --live
 ```
+
+## Releasing
+
+```powershell
+git tag -a v0.1.0.0 -m 'Jellyfin to Jellyfin 0.1.0.0'
+git push origin v0.1.0.0
+```
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the plugin, zips
+`JellyfinToJellyfin.dll`, publishes the GitHub release, and updates `manifest.json` with the new
+version, target ABI and MD5 checksum. GitHub Pages then serves the updated manifest used by the
+plugin repository URL above.
 
 ## Limitations
 
