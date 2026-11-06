@@ -9,7 +9,7 @@ The plugin never copies media: it writes `.strm` files that point at the destina
 destination streams the bytes from the source on demand. Both servers must be able to talk to each
 other over HTTP(S), and the destination needs a writable folder.
 
-Current version: **0.3.0.0** (requires Jellyfin **10.11.x**).
+Current version: **0.3.1.0** (requires Jellyfin **10.11.x**).
 
 ---
 
@@ -42,13 +42,13 @@ Current version: **0.3.0.0** (requires Jellyfin **10.11.x**).
 
 **Manually**
 
-1. Download `jellyfin-to-jellyfin-plugin_0.3.0.0.zip` from the
+1. Download `jellyfin-to-jellyfin-plugin_0.3.1.0.zip` from the
    [releases page](https://github.com/Lowitle/jellyfin-to-jellyfin-plugin/releases).
 2. Create `<jellyfin-config>/plugins/JellyfinToJellyfin/` and extract `JellyfinToJellyfin.dll` into it
    (Docker: `/config/plugins/JellyfinToJellyfin/`).
 3. Restart Jellyfin.
 
-Check it worked: Dashboard → Plugins → **Jellyfin to Jellyfin** shows version `0.3.0.0` and opens the
+Check it worked: Dashboard → Plugins → **Jellyfin to Jellyfin** shows version `0.3.1.0` and opens the
 configuration page.
 
 ## 3. Prepare the output folder

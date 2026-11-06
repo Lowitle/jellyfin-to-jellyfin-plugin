@@ -243,10 +243,10 @@ dotnet run --project .\tools\ConfigCheck\ConfigCheck.csproj -- --live
 ## Releasing
 
 ```powershell
-# 1. Bump the version in Directory.Build.props and commit it, e.g. 0.3.0.0.
+# 1. Bump the version in Directory.Build.props and commit it, e.g. 0.3.1.0.
 # 2. Tag that commit with the same version and push the tag.
-git tag -a v0.3.0.0 -m 'Jellyfin to Jellyfin 0.3.0.0'
-git push origin v0.3.0.0
+git tag -a v0.3.1.0 -m 'Jellyfin to Jellyfin 0.3.1.0'
+git push origin v0.3.1.0
 ```
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the plugin, zips
