@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "0.3.1.0",
+        "changelog": "Release 0.3.1.0",
+        "targetAbi": "10.11.6.0",
+        "sourceUrl": "https://github.com/Lowitle/jellyfin-to-jellyfin-plugin/releases/download/v0.3.1.0/jellyfin-to-jellyfin-plugin_0.3.1.0.zip",
+        "checksum": "44d9f75f69f811152bacc6cce89970d3",
+        "timestamp": "2026-11-06T19:25:31Z"
+      },
+      {
         "version": "0.3.0.0",
         "changelog": "Log in with a remote user instead of an API key. Jellyfin API keys are server-wide and always administrator level; the plugin now authenticates as a regular user (POST /Users/AuthenticateByName), caches the session token in memory, retries on 401 and discovers libraries through GET /UserViews. The password is never written to .strm files and no secret travels in a URL anymore: /api/test and /api/libraries are POST with a JSON body. Breaking: the per-instance ApiKey setting is gone - configure a user name and password instead (a non-admin account that sees the libraries you mirror is enough). The mirror now only contains items that account can actually play, so dead database entries no longer produce .strm files that answer 404.",
         "targetAbi": "10.11.6.0",
