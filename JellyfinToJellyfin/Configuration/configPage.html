@@ -233,26 +233,30 @@
             // next to it only shows for that entry and overrides the name of the library that gets created.
             function libraryTargetCell(mapping) {
                 var attach = mapping.CreateNewLibrary === false;
-                var html = '<select is="emby-select" data-field="TargetLibraryName">' + localLibraryOptions(mapping) + '</select>';
-                html += '<input type="text" is="emby-input" data-field="NewLibraryName" class="new-library-name" value="'
+                var html = '<select data-field="TargetLibraryName">' + localLibraryOptions(mapping) + '</select>';
+                html += '<input type="text" data-field="NewLibraryName" class="new-library-name" value="'
                     + attr(attach ? '' : (mapping.TargetLibraryName || ''))
                     + '" placeholder="' + attr('Auto: ' + (mapping.RemoteLibraryName || 'remote library name')) + '"'
                     + ' style="margin-top:0.35em;' + (attach ? 'display:none;' : '') + '" />';
                 return html;
             }
 
+            // Rows use plain form controls on purpose: the emby-* custom elements need specific
+            // wrappers inside a table cell (emby-checkbox looks up a <span> in its parent and throws
+            // without it, which also stops the other rows from being upgraded), so a dense grid keeps
+            // browser controls and behaves the same everywhere.
             function mappingRow(mapping, instance) {
                 var html = '<tr class="mapping-row">';
-                html += '<td><input type="checkbox" is="emby-checkbox" data-field="Enabled" title="Mirror this library"' + (mapping.Enabled ? ' checked' : '') + ' /></td>';
-                html += '<td><select is="emby-select" data-field="RemoteLibraryName">' + remoteOptions(mapping, instance) + '</select>';
+                html += '<td class="mapping-enabled"><input type="checkbox" data-field="Enabled" title="Mirror this library"' + (mapping.Enabled ? ' checked' : '') + ' /></td>';
+                html += '<td><select data-field="RemoteLibraryName">' + remoteOptions(mapping, instance) + '</select>';
                 html += '<input type="hidden" data-field="RemoteLibraryId" value="' + attr(mapping.RemoteLibraryId) + '" />';
                 html += '<input type="hidden" data-field="RemoteCollectionType" value="' + attr(mapping.RemoteCollectionType) + '" /></td>';
-                html += '<td><input type="text" is="emby-input" data-field="FolderName" value="' + attr(mapping.FolderName)
+                html += '<td><input type="text" data-field="FolderName" value="' + attr(mapping.FolderName)
                     + '" placeholder="' + attr('Auto: ' + (mapping.RemoteLibraryName || 'library name')) + '" /></td>';
                 html += '<td>' + libraryTargetCell(mapping) + '</td>';
-                html += '<td><select is="emby-select" data-field="TargetCollectionType">'
+                html += '<td><select data-field="TargetCollectionType">'
                     + collectionOptions(mapping.TargetCollectionType, mapping.RemoteCollectionType) + '</select></td>';
-                html += '<td><button type="button" is="emby-button" class="raised" data-action="remove-mapping"><span>Remove</span></button></td>';
+                html += '<td><button type="button" class="mapping-remove" data-action="remove-mapping">Remove</button></td>';
                 html += '</tr>';
                 return html;
             }
