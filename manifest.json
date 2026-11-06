@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "0.3.1.1",
+        "changelog": "Release 0.3.1.1",
+        "targetAbi": "10.11.6.0",
+        "sourceUrl": "https://github.com/Lowitle/jellyfin-to-jellyfin-plugin/releases/download/v0.3.1.1/jellyfin-to-jellyfin-plugin_0.3.1.1.zip",
+        "checksum": "75270f39ea22780ce5a033883ec0f3e6",
+        "timestamp": "2026-11-06T20:19:33Z"
+      },
+      {
         "version": "0.3.1.0",
         "changelog": "Mapping table redesign. Load remote libraries now fills one row per remote library (id, name and type come from the catalog), so nothing has to be typed from memory. Reloading matches rows by remote item id first and by name second, keeps the on/off state, folder and target of the rows you already configured, adds new libraries as Off, and keeps mappings whose remote library disappeared at the end instead of dropping them. The target column is now a 'Merge with local library' dropdown of the local libraries plus a trailing 'Create new library' entry with an optional name box (blank = remote library name); an existing library is attached by id, as the local-libraries endpoint now returns the library itemId. Folder name and Type show the defaults that will be used as 'Auto: <library>' and 'Auto: <type>' placeholders, and update live when the remote library of a row changes.",
         "targetAbi": "10.11.6.0",
