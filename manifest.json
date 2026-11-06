@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "0.2.0.0",
+        "changelog": "Release 0.2.0.0",
+        "targetAbi": "10.11.6.0",
+        "sourceUrl": "https://github.com/Lowitle/jellyfin-to-jellyfin-plugin/releases/download/v0.2.0.0/jellyfin-to-jellyfin-plugin_0.2.0.0.zip",
+        "checksum": "cd6e5137ac02dbae181afb942c261895",
+        "timestamp": "2026-11-06T05:50:26Z"
+      },
+      {
         "version": "0.1.0.0",
         "changelog": "Release 0.1.0.0",
         "targetAbi": "10.11.6.0",
