@@ -50,6 +50,10 @@ play them with its own users, libraries and metadata.
 
 ## Installation
 
+New to the plugin? The step-by-step walkthrough for a fresh setup — source user, plugin install,
+output folder, mappings, first sync and troubleshooting — is in **[docs/INSTALL.md](docs/INSTALL.md)**.
+Short version:
+
 ### From the plugin repository
 
 1. Dashboard → Plugins → Repositories → **+**
