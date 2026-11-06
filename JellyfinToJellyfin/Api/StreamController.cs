@@ -14,7 +14,7 @@ namespace JellyfinToJellyfin.Api;
 
 /// <summary>
 /// Streams original files from the configured remote instances so that generated .strm files play through this server.
-/// The remote API key never leaves the server: the .strm files only contain this endpoint.
+/// The remote credentials never leave the server: the .strm files only contain this endpoint.
 /// </summary>
 [ApiController]
 [AllowAnonymous]
@@ -55,24 +55,28 @@ public sealed class StreamController : ControllerBase
         }
 
         var targetUrl = RemoteJellyfinClient.BuildStreamUrl(instance.BaseUrl, itemId, k);
-        using var request = new HttpRequestMessage(HttpMethod.Get, targetUrl);
-        request.Headers.TryAddWithoutValidation("X-Emby-Token", instance.ApiKey);
+        using var client = new RemoteJellyfinClient(instance.BaseUrl, instance.Username, instance.Password);
 
-        foreach (var header in ForwardedRequestHeaders)
+        // The request is rebuilt for every attempt so the proxy can retry with a fresh session token.
+        HttpRequestMessage BuildRequest()
         {
-            var values = Request.Headers[header];
-            if (values.Count > 0)
+            var message = new HttpRequestMessage(HttpMethod.Get, targetUrl);
+            foreach (var header in ForwardedRequestHeaders)
             {
-                request.Headers.TryAddWithoutValidation(header, values.ToArray());
+                var values = Request.Headers[header];
+                if (values.Count > 0)
+                {
+                    message.Headers.TryAddWithoutValidation(header, values.ToArray());
+                }
             }
+
+            return message;
         }
 
         HttpResponseMessage upstream;
         try
         {
-            upstream = await RemoteJellyfinClient.ProxyClient
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
+            upstream = await client.SendStreamRequestAsync(BuildRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

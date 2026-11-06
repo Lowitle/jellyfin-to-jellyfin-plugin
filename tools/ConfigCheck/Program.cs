@@ -24,7 +24,8 @@ var config = new PluginConfiguration
             Id = "inst1",
             Name = "Home",
             BaseUrl = "http://remote:8096",
-            ApiKey = "SECRET",
+            Username = "probe",
+            Password = "SECRET",
             Enabled = true,
             DownloadImages = false,
             LastSyncUtc = new DateTime(2026, 11, 5, 10, 0, 0, DateTimeKind.Utc),
@@ -59,7 +60,7 @@ using (var doc = JsonDocument.Parse(serverJson))
 
 var reparsed = JsonSerializer.Deserialize<PluginConfiguration>(serverJson, options)!;
 Console.WriteLine();
-Console.WriteLine($"PascalCase round-trip: instances={reparsed.Instances.Count} id={reparsed.Instances[0].Id} key={reparsed.Instances[0].ApiKey} baseUrl={reparsed.Instances[0].BaseUrl} lastSync={reparsed.Instances[0].LastSyncUtc:o} lib={reparsed.Instances[0].Libraries[0].RemoteLibraryName} images={reparsed.Instances[0].DownloadImages} schedule={reparsed.ScheduleIntervalHours} startup={reparsed.SyncOnStartup} override={reparsed.ServerUrlOverride} basePath={reparsed.DefaultBasePath}");
+Console.WriteLine($"PascalCase round-trip: instances={reparsed.Instances.Count} id={reparsed.Instances[0].Id} user={reparsed.Instances[0].Username} baseUrl={reparsed.Instances[0].BaseUrl} lastSync={reparsed.Instances[0].LastSyncUtc:o} lib={reparsed.Instances[0].Libraries[0].RemoteLibraryName} images={reparsed.Instances[0].DownloadImages} schedule={reparsed.ScheduleIntervalHours} startup={reparsed.SyncOnStartup} override={reparsed.ServerUrlOverride} basePath={reparsed.DefaultBasePath}");
 
 var camelJson = JsonSerializer.Serialize(config, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 var camelReparsed = JsonSerializer.Deserialize<PluginConfiguration>(camelJson, options)!;
@@ -185,21 +186,53 @@ if (args.Contains("--live", StringComparer.OrdinalIgnoreCase))
 async Task<int> RunLiveAsync()
 {
     var baseUrl = Environment.GetEnvironmentVariable("J2J_REMOTE_URL");
-    var apiKey = Environment.GetEnvironmentVariable("J2J_REMOTE_KEY");
-    if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(apiKey))
+    var username = Environment.GetEnvironmentVariable("J2J_REMOTE_USER");
+    var password = Environment.GetEnvironmentVariable("J2J_REMOTE_PW");
+    if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(username))
     {
-        Console.WriteLine("live: set J2J_REMOTE_URL and J2J_REMOTE_KEY, then run with --live.");
+        Console.WriteLine("live: set J2J_REMOTE_URL, J2J_REMOTE_USER and J2J_REMOTE_PW, then run with --live.");
         return 2;
     }
 
-    using var client = new RemoteJellyfinClient(baseUrl!, apiKey!);
+    using var client = new RemoteJellyfinClient(baseUrl!, username!, password ?? string.Empty);
     Console.WriteLine();
     Console.WriteLine($"--- Live remote check ({client.BaseUrl}) ---");
 
-    var info = await client.GetServerInfoAsync(CancellationToken.None).ConfigureAwait(false);
+    try
+    {
+        var accessToken = await client.GetAccessTokenAsync(CancellationToken.None).ConfigureAwait(false);
+        Console.WriteLine($"auth     : user '{client.Username}' ({accessToken.Length} char token)");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"auth     : FAILED - {ex.Message}");
+        return 4;
+    }
+
+    ServerInfo? info;
+    try
+    {
+        info = await client.GetServerInfoAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"server   : FAILED - {ex.Message}");
+        return 5;
+    }
+
     Console.WriteLine($"server   : {info?.ServerName} {info?.Version} id={info?.Id}");
 
-    var libraries = await client.GetLibrariesAsync(CancellationToken.None).ConfigureAwait(false);
+    List<RemoteLibrary> libraries;
+    try
+    {
+        libraries = await client.GetLibrariesAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"libraries: FAILED - {ex.Message}");
+        return 5;
+    }
+
     foreach (var lib in libraries)
     {
         Console.WriteLine($"library  : {lib.Name} type={lib.GetEffectiveCollectionType()} itemId={lib.ItemId ?? "<missing>"}");
@@ -271,10 +304,14 @@ async Task<int> RunLiveAsync()
     {
         var kind = string.Equals(streamSample.MediaType, "Audio", StringComparison.OrdinalIgnoreCase) ? "audio" : "video";
         var url = RemoteJellyfinClient.BuildStreamUrl(client.BaseUrl, itemId, kind);
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.TryAddWithoutValidation("X-Emby-Token", client.ApiKey);
-        request.Headers.TryAddWithoutValidation("Range", "bytes=0-1023");
-        using var response = await RemoteJellyfinClient.ProxyClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+        using var response = await client.SendStreamRequestAsync(
+            () =>
+            {
+                var message = new HttpRequestMessage(HttpMethod.Get, url);
+                message.Headers.TryAddWithoutValidation("Range", "bytes=0-1023");
+                return message;
+            },
+            CancellationToken.None).ConfigureAwait(false);
         var bytes = response.IsSuccessStatusCode
             ? (await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false)).Length
             : 0;

@@ -15,7 +15,7 @@ public sealed class MirrorGeneratorTests : IDisposable
         Directory.CreateDirectory(_root);
 
         // No network access happens while images are disabled, so an unroutable host is fine here.
-        _client = new RemoteJellyfinClient("http://remote.invalid:8096", "test-key");
+        _client = new RemoteJellyfinClient("http://remote.invalid:8096", "test-user", "test-password");
     }
 
     public void Dispose()

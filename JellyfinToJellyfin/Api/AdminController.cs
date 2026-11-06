@@ -83,6 +83,11 @@ public sealed class AdminController : ControllerBase
             instance.Id = string.IsNullOrWhiteSpace(instance.Id) ? Guid.NewGuid().ToString("N")[..8] : instance.Id.Trim();
             instance.Libraries ??= new List<LibraryMapping>();
 
+            // Credentials: trim the user name but never the password (leading/trailing spaces are legitimate).
+            instance.BaseUrl = (instance.BaseUrl ?? string.Empty).Trim();
+            instance.Username = (instance.Username ?? string.Empty).Trim();
+            instance.Password ??= string.Empty;
+
             // Preserve sync bookkeeping: the configuration page never sends fresh values for these fields.
             var previous = previousInstances.FirstOrDefault(p => string.Equals(p.Id, instance.Id, StringComparison.OrdinalIgnoreCase));
             if (previous is not null)
@@ -108,24 +113,33 @@ public sealed class AdminController : ControllerBase
             StatusCode = 200
         };
 
-    /// <summary>Performs a connectivity check against a remote server.</summary>
-    /// <param name="baseUrl">Remote base URL.</param>
-    /// <param name="apiKey">Remote API key.</param>
+    /// <summary>
+    /// Performs a connectivity check against a remote server. The credentials travel in the JSON body so they
+    /// never end up in request URLs, access logs or reverse proxy logs.
+    /// </summary>
+    /// <param name="request">Remote connection settings.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Connection result.</returns>
-    [HttpGet("test")]
-    public async Task<IActionResult> TestConnection([FromQuery] string baseUrl, [FromQuery] string? apiKey, CancellationToken cancellationToken)
+    [HttpPost("test")]
+    public async Task<IActionResult> TestConnection([FromBody] RemoteConnectionRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
+        if (string.IsNullOrWhiteSpace(request.BaseUrl))
         {
             return BadRequest("baseUrl is required.");
         }
 
         try
         {
-            using var client = new RemoteJellyfinClient(baseUrl, apiKey ?? string.Empty);
+            using var client = new RemoteJellyfinClient(request.BaseUrl, request.Username ?? string.Empty, request.Password ?? string.Empty);
             var info = await client.GetServerInfoAsync(cancellationToken).ConfigureAwait(false);
-            return Ok(new { ok = info is not null, serverName = info?.ServerName, version = info?.Version, id = info?.Id });
+            return Ok(new
+            {
+                ok = info is not null,
+                serverName = info?.ServerName,
+                version = info?.Version,
+                id = info?.Id,
+                user = client.Username
+            });
         }
         catch (Exception ex)
         {
@@ -133,22 +147,21 @@ public sealed class AdminController : ControllerBase
         }
     }
 
-    /// <summary>Lists the libraries available on a remote server.</summary>
-    /// <param name="baseUrl">Remote base URL.</param>
-    /// <param name="apiKey">Remote API key.</param>
+    /// <summary>Lists the libraries available on a remote server. Credentials travel in the JSON body.</summary>
+    /// <param name="request">Remote connection settings.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Remote libraries.</returns>
-    [HttpGet("libraries")]
-    public async Task<IActionResult> GetRemoteLibraries([FromQuery] string baseUrl, [FromQuery] string? apiKey, CancellationToken cancellationToken)
+    [HttpPost("libraries")]
+    public async Task<IActionResult> GetRemoteLibraries([FromBody] RemoteConnectionRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
+        if (string.IsNullOrWhiteSpace(request.BaseUrl))
         {
             return BadRequest("baseUrl is required.");
         }
 
         try
         {
-            using var client = new RemoteJellyfinClient(baseUrl, apiKey ?? string.Empty);
+            using var client = new RemoteJellyfinClient(request.BaseUrl, request.Username ?? string.Empty, request.Password ?? string.Empty);
             var libraries = await client.GetLibrariesAsync(cancellationToken).ConfigureAwait(false);
             return Ok(libraries.Select(l => new
             {

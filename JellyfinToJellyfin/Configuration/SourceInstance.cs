@@ -24,9 +24,17 @@ public class SourceInstance
     public string BaseUrl { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the remote API key. This value is never written to .strm files.
+    /// Gets or sets the user name used to log in on the remote server.
+    /// Use a dedicated account without administrator rights: the plugin only needs read access to the
+    /// libraries it mirrors. The resulting session token is kept in memory only.
     /// </summary>
-    public string ApiKey { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the password for <see cref="Username"/>. It is stored in the plugin configuration and
+    /// never written to .strm files or exposed by the plugin API.
+    /// </summary>
+    public string Password { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the output base path for this instance. When empty, "{DefaultBasePath}/{Id}" is used.

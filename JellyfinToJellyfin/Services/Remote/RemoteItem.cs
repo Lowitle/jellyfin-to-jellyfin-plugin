@@ -18,6 +18,9 @@ public sealed class RemoteItem
 
     public string? ParentId { get; set; }
 
+    /// <summary>Gets or sets the collection type of a library item (movies, tvshows, music, boxsets, ...).</summary>
+    public string? CollectionType { get; set; }
+
     public int? IndexNumber { get; set; }
 
     public int? ParentIndexNumber { get; set; }

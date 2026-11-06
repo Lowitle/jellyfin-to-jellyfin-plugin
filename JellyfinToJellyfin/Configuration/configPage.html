@@ -6,7 +6,7 @@
             </div>
             <p class="fieldDescription">
                 Mirrors remote Jellyfin libraries as .strm/.nfo/artwork and streams playback through this server.
-                The remote API key never leaves the server: generated .strm files only contain this server's stream endpoint.
+                The remote password never leaves the server: generated .strm files only contain this server's stream endpoint.
             </p>
 
             <div class="verticalSection">
@@ -85,7 +85,8 @@
                     Id: 'inst' + Math.random().toString(36).slice(2, 8),
                     Name: '',
                     BaseUrl: '',
-                    ApiKey: '',
+                    Username: '',
+                    Password: '',
                     BasePath: '',
                     LocalServerUrl: '',
                     Enabled: true,
@@ -120,6 +121,8 @@
                 result.Instances = result.Instances || [];
                 result.Instances.forEach(function (instance) {
                     instance.Libraries = instance.Libraries || [];
+                    instance.Username = instance.Username || '';
+                    instance.Password = instance.Password || '';
                     instance.DownloadImages = !!instance.DownloadImages;
                     instance.RemoveStaleFiles = !!instance.RemoveStaleFiles;
                 });
@@ -227,7 +230,11 @@
                 html += textField('Name', 'Name', instance.Name, 'Remote server');
                 html += textField('Id', 'Instance id', instance.Id, '');
                 html += textField('BaseUrl', 'Remote base URL', instance.BaseUrl, 'https://remote.example.com');
-                html += textField('ApiKey', 'Remote API key', instance.ApiKey, '', 'password');
+                html += textField('Username', 'Remote user name', instance.Username, 'a dedicated non-admin user');
+                html += textField('Password', 'Remote password', instance.Password, '', 'password');
+                html += '<div class="fieldDescription">The plugin logs in on the remote server with this account and keeps only the '
+                    + 'session token in memory. Use a dedicated user without administrator rights that has access to just the '
+                    + 'libraries you want to mirror.</div>';
                 html += textField('BasePath', 'Output folder (optional)', instance.BasePath, 'uses the global base folder');
                 html += textField('LocalServerUrl', 'Local server URL for .strm (optional)', instance.LocalServerUrl, 'auto-detected');
                 html += '<div class="checkboxContainer"><label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" data-field="DownloadImages"'
@@ -290,7 +297,8 @@
                         Id: cardField(card, 'Id').trim(),
                         Name: cardField(card, 'Name').trim(),
                         BaseUrl: cardField(card, 'BaseUrl').trim(),
-                        ApiKey: cardField(card, 'ApiKey').trim(),
+                        Username: cardField(card, 'Username').trim(),
+                        Password: cardField(card, 'Password'),
                         BasePath: cardField(card, 'BasePath').trim(),
                         LocalServerUrl: cardField(card, 'LocalServerUrl').trim(),
                         Enabled: cardChecked(card, 'Enabled'),
@@ -347,19 +355,32 @@
                 });
             }
 
+            function remoteCredentials(card) {
+                return {
+                    BaseUrl: cardField(card, 'BaseUrl').trim(),
+                    Username: cardField(card, 'Username').trim(),
+                    Password: cardField(card, 'Password')
+                };
+            }
+
             function testConnection(card) {
-                var baseUrl = cardField(card, 'BaseUrl').trim();
-                var apiKey = cardField(card, 'ApiKey').trim();
-                if (!baseUrl) {
+                var credentials = remoteCredentials(card);
+                if (!credentials.BaseUrl) {
                     setStatus('Enter a remote base URL first.');
                     return;
                 }
 
-                setStatus('Testing ' + baseUrl + ' ...');
-                ApiClient.getJSON(apiUrl('test?baseUrl=' + encodeURIComponent(baseUrl) + '&apiKey=' + encodeURIComponent(apiKey)))
+                setStatus('Testing ' + credentials.BaseUrl + ' ...');
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: apiUrl('test'),
+                    data: JSON.stringify(credentials),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                })
                     .then(function (result) {
                         if (result && result.ok) {
-                            setStatus('Connection OK: ' + result.serverName + ' (' + result.version + ')');
+                            setStatus('Connection OK: ' + result.serverName + ' (' + result.version + ') as ' + (result.user || 'remote user'));
                         } else {
                             setStatus('Connection failed: ' + ((result && result.error) || 'unknown error'));
                         }
@@ -370,9 +391,8 @@
             }
 
             function loadRemoteLibraries(card) {
-                var baseUrl = cardField(card, 'BaseUrl').trim();
-                var apiKey = cardField(card, 'ApiKey').trim();
-                if (!baseUrl) {
+                var credentials = remoteCredentials(card);
+                if (!credentials.BaseUrl) {
                     setStatus('Enter a remote base URL first.');
                     return;
                 }
@@ -381,7 +401,13 @@
                 collectConfig();
                 setStatus('Loading remote libraries ...');
 
-                ApiClient.getJSON(apiUrl('libraries?baseUrl=' + encodeURIComponent(baseUrl) + '&apiKey=' + encodeURIComponent(apiKey)))
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: apiUrl('libraries'),
+                    data: JSON.stringify(credentials),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                })
                     .then(function (libraries) {
                         if (!Array.isArray(libraries)) {
                             setStatus('Could not load libraries: ' + ((libraries && libraries.error) || 'unknown error'));

@@ -170,6 +170,12 @@ public sealed class SyncService
                 return report;
             }
 
+            if (string.IsNullOrWhiteSpace(instance.Username))
+            {
+                report.AddError("No remote user configured. Set a user name and password for this instance.");
+                return report;
+            }
+
             var mappings = instance.Libraries.Where(m => m.Enabled).ToList();
             if (mappings.Count == 0)
             {
@@ -184,7 +190,7 @@ public sealed class SyncService
                 return report;
             }
 
-            using var client = new RemoteJellyfinClient(instance.BaseUrl, instance.ApiKey);
+            using var client = new RemoteJellyfinClient(instance.BaseUrl, instance.Username, instance.Password);
             List<RemoteLibrary> remoteLibraries;
             try
             {
