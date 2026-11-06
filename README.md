@@ -101,7 +101,8 @@ Per **source instance**:
 | `RemoveStaleFiles` | After a successful sync, delete `.strm`/`.nfo` files (and artwork, when artwork download is on) that no longer map to a source item. Default `false`. |
 | `Enabled` | Include this instance in scheduled and global syncs. |
 
-Per **library mapping**:
+Per **library mapping** (in the UI, press **Load remote libraries** and the table fills itself with one
+row per remote library; new rows start unticked):
 
 | Setting | Description |
 | --- | --- |

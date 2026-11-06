@@ -184,6 +184,7 @@ public sealed class AdminController : ControllerBase
         => Ok(_libraryManager.GetVirtualFolders().Select(v => new
         {
             name = v.Name,
+            itemId = v.ItemId,
             collectionType = v.CollectionType?.ToString(),
             locations = v.Locations ?? Array.Empty<string>()
         }));

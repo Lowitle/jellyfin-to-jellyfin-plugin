@@ -37,7 +37,6 @@
             <div class="verticalSection">
                 <h3 class="sectionTitle">Remote instances</h3>
                 <div id="instances"></div>
-                <datalist id="localLibraryNames"></datalist>
                 <br />
                 <button id="addInstance" is="emby-button" type="button" class="raised block"><span>Add instance</span></button>
             </div>
@@ -57,6 +56,8 @@
             'use strict';
 
             var COLLECTION_TYPES = ['', 'movies', 'tvshows', 'music', 'musicvideos', 'homevideos', 'boxsets', 'books', 'mixed'];
+            // Sentinel value of the "merge with local library" select: create a library for this mapping.
+            var NEW_LIBRARY = '__new__';
             var state = { config: null, remote: {}, localLibraries: [], pollTimer: null };
 
             function el(id) {
@@ -167,11 +168,12 @@
                 return parts.length ? parts.join(' - ') : 'Never synced.';
             }
 
-            function collectionOptions(current) {
+            function collectionOptions(current, remoteType) {
                 var html = '';
                 COLLECTION_TYPES.forEach(function (type) {
+                    var label = type === '' ? 'Auto: ' + (remoteType || 'mixed') : type;
                     html += '<option value="' + attr(type) + '"' + (type === (current || '') ? ' selected' : '') + '>'
-                        + attr(type || '(auto)') + '</option>';
+                        + attr(label) + '</option>';
                 });
                 return html;
             }
@@ -196,20 +198,90 @@
                 return html;
             }
 
+            function localLibraryOptions(mapping) {
+                var html = '';
+                var attach = mapping.CreateNewLibrary === false;
+                var targetName = mapping.TargetLibraryName || '';
+                var targetId = mapping.TargetLibraryId || '';
+                var matched = false;
+
+                (state.localLibraries || []).forEach(function (library) {
+                    var selected = attach && (targetId
+                        ? library.itemId === targetId
+                        : (!!targetName && !!library.name && library.name.toLowerCase() === targetName.toLowerCase()));
+                    if (selected) {
+                        matched = true;
+                    }
+                    html += '<option value="' + attr(library.name) + '" data-id="' + attr(library.itemId) + '"'
+                        + (selected ? ' selected' : '') + '>'
+                        + attr(library.name) + (library.collectionType ? ' (' + library.collectionType + ')' : '')
+                        + '</option>';
+                });
+
+                // Keep a stored target that is no longer listed (deleted library, failed list request)
+                // instead of silently pointing the mapping somewhere else.
+                if (attach && targetName && !matched) {
+                    html += '<option value="' + attr(targetName) + '" data-id="' + attr(targetId) + '" selected>'
+                        + attr(targetName) + '</option>';
+                }
+
+                html += '<option value="' + NEW_LIBRARY + '"' + (attach ? '' : ' selected') + '>Create new library</option>';
+                return html;
+            }
+
+            // Select with the existing local libraries plus a "create new library" entry; the text input
+            // next to it only shows for that entry and overrides the name of the library that gets created.
+            function libraryTargetCell(mapping) {
+                var attach = mapping.CreateNewLibrary === false;
+                var html = '<select is="emby-select" data-field="TargetLibraryName">' + localLibraryOptions(mapping) + '</select>';
+                html += '<input type="text" is="emby-input" data-field="NewLibraryName" class="new-library-name" value="'
+                    + attr(attach ? '' : (mapping.TargetLibraryName || ''))
+                    + '" placeholder="' + attr('Auto: ' + (mapping.RemoteLibraryName || 'remote library name')) + '"'
+                    + ' style="margin-top:0.35em;' + (attach ? 'display:none;' : '') + '" />';
+                return html;
+            }
+
             function mappingRow(mapping, instance) {
                 var html = '<tr class="mapping-row">';
-                html += '<td><input type="checkbox" is="emby-checkbox" data-field="Enabled"' + (mapping.Enabled ? ' checked' : '') + ' /></td>';
+                html += '<td><input type="checkbox" is="emby-checkbox" data-field="Enabled" title="Mirror this library"' + (mapping.Enabled ? ' checked' : '') + ' /></td>';
                 html += '<td><select is="emby-select" data-field="RemoteLibraryName">' + remoteOptions(mapping, instance) + '</select>';
                 html += '<input type="hidden" data-field="RemoteLibraryId" value="' + attr(mapping.RemoteLibraryId) + '" />';
-                html += '<input type="hidden" data-field="RemoteCollectionType" value="' + attr(mapping.RemoteCollectionType) + '" />';
-                html += '<input type="hidden" data-field="TargetLibraryId" value="' + attr(mapping.TargetLibraryId) + '" />';
-                html += '<input type="hidden" data-field="CreateNewLibrary" value="' + (mapping.CreateNewLibrary === false ? 'false' : 'true') + '" /></td>';
-                html += '<td><input type="text" is="emby-input" data-field="FolderName" value="' + attr(mapping.FolderName) + '" placeholder="auto" /></td>';
-                html += '<td><input type="text" is="emby-input" list="localLibraryNames" data-field="TargetLibraryName" value="' + attr(mapping.TargetLibraryName) + '" /></td>';
-                html += '<td><select is="emby-select" data-field="TargetCollectionType">' + collectionOptions(mapping.TargetCollectionType) + '</select></td>';
+                html += '<input type="hidden" data-field="RemoteCollectionType" value="' + attr(mapping.RemoteCollectionType) + '" /></td>';
+                html += '<td><input type="text" is="emby-input" data-field="FolderName" value="' + attr(mapping.FolderName)
+                    + '" placeholder="' + attr('Auto: ' + (mapping.RemoteLibraryName || 'library name')) + '" /></td>';
+                html += '<td>' + libraryTargetCell(mapping) + '</td>';
+                html += '<td><select is="emby-select" data-field="TargetCollectionType">'
+                    + collectionOptions(mapping.TargetCollectionType, mapping.RemoteCollectionType) + '</select></td>';
                 html += '<td><button type="button" is="emby-button" class="raised" data-action="remove-mapping"><span>Remove</span></button></td>';
                 html += '</tr>';
                 return html;
+            }
+
+            // Re-syncs the "Auto: ..." hints of a row with the remote library selected in it.
+            function updateAutoLabels(row) {
+                if (!row) {
+                    return;
+                }
+
+                var select = row.querySelector('[data-field="RemoteLibraryName"]');
+                var option = select && select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+                var remoteName = (select ? select.value : '') || 'library name';
+                var remoteType = (option && option.getAttribute('data-type')) || 'mixed';
+
+                var folder = row.querySelector('[data-field="FolderName"]');
+                if (folder) {
+                    folder.setAttribute('placeholder', 'Auto: ' + remoteName);
+                }
+
+                var type = row.querySelector('[data-field="TargetCollectionType"]');
+                if (type && type.options.length) {
+                    type.options[0].text = 'Auto: ' + remoteType;
+                }
+
+                var name = row.querySelector('[data-field="NewLibraryName"]');
+                if (name) {
+                    name.setAttribute('placeholder', 'Auto: ' + remoteName);
+                }
             }
 
             function textField(field, label, value, placeholder, type) {
@@ -245,13 +317,20 @@
                 html += '<button type="button" is="emby-button" class="raised" data-action="test-instance"><span>Test connection</span></button>';
                 html += '<button type="button" is="emby-button" class="raised" data-action="load-libraries"><span>Load remote libraries</span></button>';
                 html += '</div>';
-                html += '<h4 class="sectionTitle">Library mappings</h4>';
-                html += '<table style="width:100%;"><thead><tr><th>On</th><th>Remote library</th><th>Folder</th><th>Local library</th><th>Type</th><th></th></tr></thead><tbody class="mappings">';
+                html += '<h4 class="sectionTitle">Libraries to mirror</h4>';
+                html += '<div class="fieldDescription">Loading the remote libraries fills this table with one row per remote library: tick the ones you want mirrored, then press Save.</div>';
+                html += '<table style="width:100%;"><thead><tr><th>On</th><th>Remote library</th><th>Folder name</th><th>Merge with local library</th><th>Type</th><th></th></tr></thead><tbody class="mappings">';
+                if (!instance.Libraries.length) {
+                    html += '<tr><td colspan="6" class="fieldDescription">No remote libraries listed yet. Press "Load remote libraries" above.</td></tr>';
+                }
                 instance.Libraries.forEach(function (mapping) {
                     html += mappingRow(mapping, instance);
                 });
                 html += '</tbody></table>';
-                html += '<button type="button" is="emby-button" class="raised" data-action="add-mapping"><span>Add mapping</span></button>';
+                html += '<button type="button" is="emby-button" class="raised" data-action="add-mapping"><span>Add mapping manually</span></button>';
+                html += '<div class="fieldDescription">Folder name: empty means the remote library name. '
+                    + 'Merge with local library: choose an existing library to add the mirrored folder to it, or choose '
+                    + 'Create new library to have one created (the text box sets its name, empty means the remote library name).</div>';
                 html += '<div class="fieldDescription instance-status">' + attr(statusLine(instance)) + '</div>';
                 html += '</div>';
                 return html;
@@ -267,19 +346,28 @@
                 return !!(node && node.checked);
             }
 
+            function rowValue(row, field) {
+                var node = row.querySelector('[data-field="' + field + '"]');
+                return node && typeof node.value === 'string' ? node.value : '';
+            }
+
             function collectMapping(row) {
                 var select = row.querySelector('[data-field="RemoteLibraryName"]');
                 var option = select && select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+                var target = row.querySelector('[data-field="TargetLibraryName"]');
+                var targetOption = target && target.selectedIndex >= 0 ? target.options[target.selectedIndex] : null;
+                var createNew = !targetOption || targetOption.value === NEW_LIBRARY;
+
                 return {
                     Enabled: !!row.querySelector('[data-field="Enabled"]').checked,
                     RemoteLibraryName: select ? select.value : '',
-                    RemoteLibraryId: (option && option.getAttribute('data-id')) || row.querySelector('[data-field="RemoteLibraryId"]').value || '',
-                    RemoteCollectionType: (option && option.getAttribute('data-type')) || row.querySelector('[data-field="RemoteCollectionType"]').value || '',
-                    FolderName: row.querySelector('[data-field="FolderName"]').value.trim(),
-                    TargetLibraryName: row.querySelector('[data-field="TargetLibraryName"]').value.trim(),
-                    TargetCollectionType: row.querySelector('[data-field="TargetCollectionType"]').value,
-                    TargetLibraryId: row.querySelector('[data-field="TargetLibraryId"]').value,
-                    CreateNewLibrary: row.querySelector('[data-field="CreateNewLibrary"]').value !== 'false'
+                    RemoteLibraryId: (option && option.getAttribute('data-id')) || rowValue(row, 'RemoteLibraryId'),
+                    RemoteCollectionType: (option && option.getAttribute('data-type')) || rowValue(row, 'RemoteCollectionType'),
+                    FolderName: rowValue(row, 'FolderName').trim(),
+                    TargetLibraryName: createNew ? rowValue(row, 'NewLibraryName').trim() : target.value,
+                    TargetCollectionType: rowValue(row, 'TargetCollectionType'),
+                    TargetLibraryId: createNew ? '' : ((targetOption && targetOption.getAttribute('data-id')) || ''),
+                    CreateNewLibrary: createNew
                 };
             }
 
@@ -309,7 +397,7 @@
                         Libraries: []
                     };
 
-                    var rows = card.querySelectorAll('tbody.mappings tr');
+                    var rows = card.querySelectorAll('tbody.mappings tr.mapping-row');
                     for (var r = 0; r < rows.length; r++) {
                         instance.Libraries.push(collectMapping(rows[r]));
                     }
@@ -390,6 +478,60 @@
                     });
             }
 
+            // Turns the loaded remote catalog into table rows: every remote library gets a row that keeps the
+            // settings already stored for it, so the user only ticks the ones that must be mirrored.
+            function mergeRemoteMappings(instanceId, libraries) {
+                var instance = instanceById(instanceId);
+                if (!instance) {
+                    return 0;
+                }
+
+                var previous = instance.Libraries || [];
+                var reused = [];
+                var added = 0;
+
+                var merged = libraries.map(function (library) {
+                    var match = -1;
+                    for (var i = 0; i < previous.length; i++) {
+                        if (reused.indexOf(i) >= 0) {
+                            continue;
+                        }
+                        var candidate = previous[i];
+                        var sameId = !!library.itemId && candidate.RemoteLibraryId === library.itemId;
+                        var sameName = !!library.name && !!candidate.RemoteLibraryName
+                            && candidate.RemoteLibraryName.toLowerCase() === library.name.toLowerCase();
+                        if (sameId || sameName) {
+                            match = i;
+                            break;
+                        }
+                    }
+
+                    var mapping = match >= 0 ? previous[match] : newMapping();
+                    if (match >= 0) {
+                        reused.push(match);
+                    } else {
+                        added++;
+                        // Newly discovered libraries stay off until the user ticks them.
+                        mapping.Enabled = false;
+                    }
+
+                    mapping.RemoteLibraryId = library.itemId || '';
+                    mapping.RemoteLibraryName = library.name || '';
+                    mapping.RemoteCollectionType = library.collectionType || '';
+                    return mapping;
+                });
+
+                // Keep mappings whose remote library is not listed anymore (access removed, server unreachable).
+                previous.forEach(function (mapping, index) {
+                    if (reused.indexOf(index) < 0) {
+                        merged.push(mapping);
+                    }
+                });
+
+                instance.Libraries = merged;
+                return added;
+            }
+
             function loadRemoteLibraries(card) {
                 var credentials = remoteCredentials(card);
                 if (!credentials.BaseUrl) {
@@ -415,8 +557,14 @@
                         }
 
                         state.remote[instanceId] = libraries;
+                        var added = mergeRemoteMappings(instanceId, libraries);
                         renderInstances();
-                        setStatus('Loaded ' + libraries.length + ' remote librar' + (libraries.length === 1 ? 'y' : 'ies') + '.');
+                        var message = 'Loaded ' + libraries.length + ' remote librar'
+                            + (libraries.length === 1 ? 'y' : 'ies') + ': tick the ones to mirror, then press Save.';
+                        if (added) {
+                            message += ' ' + added + ' new row' + (added === 1 ? ' was' : 's were') + ' added as Off.';
+                        }
+                        setStatus(message);
                     })
                     .catch(function (error) {
                         setStatus('Could not load libraries: ' + describeError(error));
@@ -427,14 +575,15 @@
                 ApiClient.getJSON(apiUrl('local-libraries'))
                     .then(function (libraries) {
                         state.localLibraries = libraries || [];
-                        var html = '';
-                        state.localLibraries.forEach(function (library) {
-                            html += '<option value="' + attr(library.name) + '"></option>';
-                        });
-                        el('localLibraryNames').innerHTML = html;
+                        // Local libraries usually arrive after the configuration: refresh the selects without
+                        // dropping whatever the user already typed.
+                        if (state.config) {
+                            collectConfig();
+                            renderInstances();
+                        }
                     })
                     .catch(function () {
-                        // Non fatal: the local library field falls back to free text.
+                        // Non fatal: the select then only offers "Create new library".
                     });
             }
 
@@ -573,6 +722,32 @@
                         testConnection(card);
                     } else if (action === 'load-libraries') {
                         loadRemoteLibraries(card);
+                    }
+                });
+
+                // Keep the "Auto: ..." hints of a row in sync with the remote library selected in it, and
+                // toggle the "new library name" box depending on the "Merge with local library" choice.
+                el('instances').addEventListener('change', function (event) {
+                    var target = event.target;
+                    var field = target && target.getAttribute ? target.getAttribute('data-field') : '';
+                    var cell = target ? target.parentNode : null;
+                    if (!cell) {
+                        return;
+                    }
+
+                    if (field === 'RemoteLibraryName') {
+                        updateAutoLabels(cell.parentNode);
+                    } else if (field === 'TargetLibraryName') {
+                        var name = cell.querySelector('[data-field="NewLibraryName"]');
+                        if (!name) {
+                            return;
+                        }
+
+                        var creating = target.value === NEW_LIBRARY;
+                        name.style.display = creating ? '' : 'none';
+                        if (!creating) {
+                            name.value = '';
+                        }
                     }
                 });
             }

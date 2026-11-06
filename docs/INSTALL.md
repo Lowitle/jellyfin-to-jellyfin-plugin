@@ -100,15 +100,20 @@ Then:
    or a disabled/revoked account.
 2. **Load remote libraries** — the list shows exactly what that user can see.
 
-**Library mappings** → **Add mapping** for each remote library you want locally:
+**Libraries to mirror** fills itself with one row per remote library as soon as that list loads.
+Every new row starts **Off**: tick the ones you want mirrored locally, tweak the optional columns if
+needed, and press **Save**.
 
 | Column | Meaning |
 | --- | --- |
-| On | Include this mapping in the sync. |
-| Remote library | Pick one of the loaded libraries. |
-| Folder | Folder created under the instance base path. `auto` = the remote library name. |
-| Local library | Local library to create or attach to. If a library with that name already exists the folder is attached to it, otherwise it is created on the first sync. |
-| Type | Collection type used when the library is created (movies, shows, music, …). |
+| On | Mirror this library. Unticked rows are ignored by the sync. |
+| Remote library | Source library. Only what the configured user can see is listed. |
+| Folder name | Folder created under the instance base path. Empty (`Auto: <library>`) = the remote library name. |
+| Merge with local library | `Create new library` (default) creates a local library pointing at the folder on the first sync; picking an existing library instead adds the folder to that library. The text box under the select names the library to create (empty = the remote library name). |
+| Type | Collection type of the library that gets created. `Auto: <type>` = the remote library's own type. |
+
+Loading the remote libraries again keeps what you already configured — rows are matched by library
+id first and by name second — and only appends rows for libraries that are new, also Off.
 
 Finally click **Save**.
 
