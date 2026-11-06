@@ -152,6 +152,7 @@ right content type, works just as well.
 | Sync stops with a permission error | The output folder is not writable by the Jellyfin user (step 3). |
 | Playback starts slowly or buffers | The destination proxies the original file; check the link between both servers. The plugin never transcodes. |
 | Playback works for you but not for remote users | The URL written into the `.strm` files (auto-detected or `Local server URL`) must be reachable from where they play. |
+| Test connection fails but `curl` works in your shell | The plugin runs inside the Jellyfin process, which can sit in a different network namespace (Docker sidecar, container). Test from inside that container: `docker exec <jellyfin> curl -sS <BaseUrl>/System/Info/Public`. |
 
 ## 8. Network options
 
@@ -165,3 +166,28 @@ Three ways to connect destination → source, from safest to riskiest:
 
 The plugin only makes outbound calls from destination to source, so the source never needs to reach
 the destination — which is what makes the tunnel option so convenient.
+
+### Example: Tailscale (or any WireGuard tunnel)
+
+The plugin has no notion of a network option: it just needs a URL it can reach. Swapping
+`https://source.example.com` or `192.168.1.10:8096` for a tailnet address is the whole change.
+
+1. Bring the tunnel up on both servers. With Docker on the destination, the usual shape is a
+   `tailscale/tailscale` sidecar and Jellyfin joining its namespace (`network_mode: "service:tailscale"`),
+   publishing Jellyfin's port on the sidecar (`ports: [ "8096:8096" ]`) so LAN clients keep working.
+2. Set the instance `BaseUrl` to the address the destination sees on the tailnet:
+   `http://100.101.102.103:8096`, or the MagicDNS name `http://source-host:8096`. Write the scheme
+   and the port — nothing is inferred.
+3. Leave `Local server URL` pointing at the destination. The `.strm` files must send the players to
+   the destination, never to the tunnel. With the sidecar setup the destination only sees the tunnel
+   interface, so pin it explicitly to its LAN URL instead of trusting the auto-detection.
+4. Delete the port-forward on the source's router. From then on only the tailnet reaches the source,
+   and the mirror user's password never crosses the internet unprotected.
+5. Verify from inside the Jellyfin container rather than from a laptop shell:
+   `docker exec <jellyfin> curl -sS <BaseUrl>/System/Info/Public`.
+
+Plain HTTP is fine inside the tunnel: WireGuard already encrypts the hop, and calling `:8096`
+directly skips the reverse proxy, which would otherwise present a certificate naming the public
+host and not the tailnet address. If you want HTTPS anyway, `tailscale serve https / http://127.0.0.1:8096`
+on the source gives a valid `https://<host>.<tailnet>.ts.net` name. A self-hosted WireGuard, a NAS
+VPN or ZeroTier works the same way with their own addresses.
