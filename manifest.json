@@ -10,7 +10,7 @@
     "versions": [
       {
         "version": "0.3.1.1",
-        "changelog": "Release 0.3.1.1",
+        "changelog": "Mapping table fix. The per-row On checkbox was created as a Jellyfin checkbox (is=emby-checkbox) without the label/span wrapper that element requires: it threw while initialising, so the first row showed a black box that ignored clicks and the rest of the table was left half-styled. Rows now use plain checkbox, select, input and button controls, which toggle and render the same in every browser and keep the compact grid layout. Nothing else changed, so 0.3.1.0 configurations, mappings and mirrors keep working as they are.",
         "targetAbi": "10.11.6.0",
         "sourceUrl": "https://github.com/Lowitle/jellyfin-to-jellyfin-plugin/releases/download/v0.3.1.1/jellyfin-to-jellyfin-plugin_0.3.1.1.zip",
         "checksum": "75270f39ea22780ce5a033883ec0f3e6",
