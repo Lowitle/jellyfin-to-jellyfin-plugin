@@ -292,7 +292,7 @@ async Task MirrorAsync(RemoteJellyfinClient remoteClient, List<RemoteItem> items
         Directory.Delete(targetDir, recursive: true);
     }
 
-    var generator = new MirrorGenerator(remoteClient, "live", "http://localhost:8096", downloadImages: false, NullLogger.Instance);
+    var generator = new MirrorGenerator(remoteClient, "live", "http://localhost:8096", downloadImages: false, removeStaleFiles: false, NullLogger.Instance);
     await generator.GenerateAsync(items, targetDir, CancellationToken.None).ConfigureAwait(false);
     Console.WriteLine($"mirror   : {generator.StrmWritten} strm, {generator.NfoWritten} nfo, {generator.ImagesWritten} images, {generator.DuplicatesSkipped} duplicate path(s), {generator.Warnings.Count} warnings -> {targetDir}");
     foreach (var warning in generator.Warnings.Take(5))

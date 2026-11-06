@@ -26,6 +26,8 @@ public sealed class SyncReport
 
     public int DuplicatesSkipped { get; set; }
 
+    public int StaleRemoved { get; set; }
+
     public List<string> Errors { get; } = new();
 
     public List<string> Warnings { get; } = new();
@@ -46,6 +48,7 @@ public sealed class SyncReport
         NfoWritten += other.NfoWritten;
         ImagesWritten += other.ImagesWritten;
         DuplicatesSkipped += other.DuplicatesSkipped;
+        StaleRemoved += other.StaleRemoved;
         Errors.AddRange(other.Errors);
         Warnings.AddRange(other.Warnings);
         Notes.AddRange(other.Notes);
@@ -53,7 +56,7 @@ public sealed class SyncReport
 
     public string Summary()
         => Success
-            ? $"OK - {LibrariesSynced} libraries, {ItemsSeen} items, {StrmWritten} strm, {DuplicatesSkipped} duplicate path(s) at {DateTime.UtcNow:u}"
+            ? $"OK - {LibrariesSynced} libraries, {ItemsSeen} items, {StrmWritten} strm, {DuplicatesSkipped} duplicate path(s), {StaleRemoved} stale removed at {DateTime.UtcNow:u}"
             : $"Failed - {Errors.Count} error(s) at {DateTime.UtcNow:u}";
 
     public Dictionary<string, object?> ToDto() => new()
@@ -67,6 +70,7 @@ public sealed class SyncReport
         ["nfoWritten"] = NfoWritten,
         ["imagesWritten"] = ImagesWritten,
         ["duplicatesSkipped"] = DuplicatesSkipped,
+        ["staleRemoved"] = StaleRemoved,
         ["errors"] = Errors,
         ["warnings"] = Warnings,
         ["notes"] = Notes

@@ -90,6 +90,7 @@
                     LocalServerUrl: '',
                     Enabled: true,
                     DownloadImages: true,
+                    RemoveStaleFiles: false,
                     Libraries: [],
                     LastSyncUtc: null,
                     LastSyncStatus: ''
@@ -119,6 +120,8 @@
                 result.Instances = result.Instances || [];
                 result.Instances.forEach(function (instance) {
                     instance.Libraries = instance.Libraries || [];
+                    instance.DownloadImages = !!instance.DownloadImages;
+                    instance.RemoveStaleFiles = !!instance.RemoveStaleFiles;
                 });
                 return result;
             }
@@ -229,6 +232,8 @@
                 html += textField('LocalServerUrl', 'Local server URL for .strm (optional)', instance.LocalServerUrl, 'auto-detected');
                 html += '<div class="checkboxContainer"><label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" data-field="DownloadImages"'
                     + (instance.DownloadImages ? ' checked' : '') + ' /><span>Download artwork</span></label></div>';
+                html += '<div class="checkboxContainer"><label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" data-field="RemoveStaleFiles"'
+                    + (instance.RemoveStaleFiles ? ' checked' : '') + ' /><span>Remove stale .strm/.nfo files</span></label></div>';
                 html += '<div class="flex align-items-center" style="gap:0.5em;margin:0.5em 0;">';
                 html += '<button type="button" is="emby-button" class="raised" data-action="test-instance"><span>Test connection</span></button>';
                 html += '<button type="button" is="emby-button" class="raised" data-action="load-libraries"><span>Load remote libraries</span></button>';
@@ -290,6 +295,7 @@
                         LocalServerUrl: cardField(card, 'LocalServerUrl').trim(),
                         Enabled: cardChecked(card, 'Enabled'),
                         DownloadImages: cardChecked(card, 'DownloadImages'),
+                        RemoveStaleFiles: cardChecked(card, 'RemoveStaleFiles'),
                         LastSyncUtc: card.getAttribute('data-last-sync') || null,
                         LastSyncStatus: card.getAttribute('data-last-status') || '',
                         Libraries: []
@@ -419,7 +425,8 @@
                         + report.strmWritten + ' strm, '
                         + report.nfoWritten + ' nfo, '
                         + report.imagesWritten + ' images, '
-                        + (report.duplicatesSkipped || 0) + ' duplicate path(s)');
+                        + (report.duplicatesSkipped || 0) + ' duplicate path(s), '
+                        + (report.staleRemoved || 0) + ' stale removed');
                     (report.errors || []).slice(0, 10).forEach(function (message) {
                         lines.push('  error: ' + message);
                     });

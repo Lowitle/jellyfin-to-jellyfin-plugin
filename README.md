@@ -91,6 +91,7 @@ Per **source instance**:
 | `BasePath` | Optional output root for this instance. |
 | `LocalServerUrl` | Optional per-instance override of the URL written into `.strm` files. |
 | `DownloadImages` | Download posters/backdrops/logos/banners from the source. |
+| `RemoveStaleFiles` | After a successful sync, delete `.strm`/`.nfo` files (and artwork, when artwork download is on) that no longer map to a source item. Default `false`. |
 | `Enabled` | Include this instance in scheduled and global syncs. |
 
 Per **library mapping**:
@@ -138,6 +139,12 @@ Behaviour worth knowing:
   (e.g. `documentals [957b29ef]`) instead of overwriting the first.
 - Files whose path is already claimed by another item (true duplicates in the source library) are
   counted as `duplicatesSkipped` in the sync report rather than silently overwritten.
+- With `RemoveStaleFiles` enabled, a sync deletes mirror files that no longer belong to any source item
+  and then prunes the folders left empty. The pass is deliberately conservative: it only runs when the
+  sync produced mirror paths and no item failed, it only touches generated `.strm`/`.nfo` files (plus
+  artwork when artwork download is on) inside the mapped folder, and anything else you keep there
+  (extra `.srt`, `.mkv`, `.txt`, hand-made artwork) is never touched. Deletions are reported as
+  `staleRemoved`.
 
 ## Scheduled task
 
@@ -161,6 +168,9 @@ All `/JellyfinToJellyfin/api/*` endpoints require an admin (elevated) session.
 
 `GET /JellyfinToJellyfin/stream/{instanceId}/{itemId}?k=video|audio` is the anonymous playback
 proxy that the generated `.strm` files point at.
+
+The last report returned by `/api/status` exposes `strmWritten`, `nfoWritten`, `imagesWritten`,
+`duplicatesSkipped` and `staleRemoved` counters plus the `errors`/`warnings`/`notes` lists.
 
 ## Security notes
 
@@ -205,8 +215,10 @@ dotnet run --project .\tools\ConfigCheck\ConfigCheck.csproj -- --live
 ## Releasing
 
 ```powershell
-git tag -a v0.1.0.0 -m 'Jellyfin to Jellyfin 0.1.0.0'
-git push origin v0.1.0.0
+# 1. Bump the version in Directory.Build.props and commit it, e.g. 0.2.0.0.
+# 2. Tag that commit with the same version and push the tag.
+git tag -a v0.2.0.0 -m 'Jellyfin to Jellyfin 0.2.0.0'
+git push origin v0.2.0.0
 ```
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds the plugin, zips
@@ -219,7 +231,8 @@ plugin repository URL above.
 - Only direct play of the original file is supported; the plugin does not transcode.
 - `BoxSet`, `Playlist`, `Book`, `Photo` and `PhotoAlbum` items are skipped (no original-file stream).
 - Mirrored metadata is written fresh each sync; manual edits to generated `.nfo` files are
-  overwritten, and stale files from removed items are not deleted.
+  overwritten. Files left behind by removed items are only cleaned up when `RemoveStaleFiles` is
+  enabled for that instance (it is off by default).
 - Library/mapping changes take effect on the next sync.
 
 ## License

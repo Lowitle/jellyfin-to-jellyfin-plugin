@@ -185,9 +185,112 @@ public sealed class MirrorGeneratorTests : IDisposable
         Assert.Empty(generator.Warnings);
     }
 
-    private async Task<MirrorGenerator> Mirror(params RemoteItem[] items)
+    [Fact]
+    public async Task StaleFiles_AreRemoved_WhenEnabled()
     {
-        var generator = new MirrorGenerator(_client, "inst1", "http://local:8096/", downloadImages: false, NullLogger.Instance);
+        var heat = new RemoteItem { Id = "movie1", Name = "Heat", Type = "Movie", ProductionYear = 1995 };
+        var alien = new RemoteItem { Id = "movie2", Name = "Alien", Type = "Movie", ProductionYear = 1979 };
+
+        await Mirror(heat, alien);
+        var staleDir = Path.Combine(_root, "Alien (1979)");
+        Assert.True(File.Exists(Path.Combine(staleDir, "Alien (1979).strm")));
+
+        // Second pass: the remote no longer lists Alien, so its mirror files must go away.
+        var generator = await Mirror(downloadImages: false, removeStaleFiles: true, heat);
+
+        Assert.False(Directory.Exists(staleDir));
+        Assert.True(File.Exists(Path.Combine(_root, "Heat (1995)", "Heat (1995).strm")));
+        Assert.Equal(2, generator.StaleRemoved);
+        Assert.Empty(generator.Warnings);
+    }
+
+    [Fact]
+    public async Task StaleFiles_AreKept_WhenDisabled()
+    {
+        var heat = new RemoteItem { Id = "movie1", Name = "Heat", Type = "Movie", ProductionYear = 1995 };
+        var alien = new RemoteItem { Id = "movie2", Name = "Alien", Type = "Movie", ProductionYear = 1979 };
+
+        await Mirror(heat, alien);
+        var generator = await Mirror(heat);
+
+        Assert.True(File.Exists(Path.Combine(_root, "Alien (1979)", "Alien (1979).strm")));
+        Assert.True(File.Exists(Path.Combine(_root, "Alien (1979)", "Alien (1979).nfo")));
+        Assert.Equal(0, generator.StaleRemoved);
+    }
+
+    [Fact]
+    public async Task StaleCleanup_LeavesUnknownFilesAndTheirFolderInPlace()
+    {
+        var heat = new RemoteItem { Id = "movie1", Name = "Heat", Type = "Movie", ProductionYear = 1995 };
+        var alien = new RemoteItem { Id = "movie2", Name = "Alien", Type = "Movie", ProductionYear = 1979 };
+
+        await Mirror(heat, alien);
+        var staleDir = Path.Combine(_root, "Alien (1979)");
+        var keep = Path.Combine(staleDir, "notes.txt");
+        await File.WriteAllTextAsync(keep, "kept by the user");
+
+        var generator = await Mirror(downloadImages: false, removeStaleFiles: true, heat);
+
+        Assert.True(File.Exists(keep));
+        Assert.True(Directory.Exists(staleDir));
+        Assert.False(File.Exists(Path.Combine(staleDir, "Alien (1979).strm")));
+        Assert.Equal(2, generator.StaleRemoved);
+    }
+
+    [Fact]
+    public async Task StaleArtwork_IsKeptWhenImageDownloadIsDisabled()
+    {
+        var heat = new RemoteItem { Id = "movie1", Name = "Heat", Type = "Movie", ProductionYear = 1995 };
+        var alien = new RemoteItem { Id = "movie2", Name = "Alien", Type = "Movie", ProductionYear = 1979 };
+
+        await Mirror(heat, alien);
+        var staleDir = Path.Combine(_root, "Alien (1979)");
+        var poster = Path.Combine(staleDir, "poster.jpg");
+        await File.WriteAllBytesAsync(poster, new byte[] { 1, 2, 3 });
+
+        var generator = await Mirror(downloadImages: false, removeStaleFiles: true, heat);
+
+        // The plugin did not own artwork in this run, so a leftover poster is left for the operator.
+        Assert.True(File.Exists(poster));
+        Assert.Equal(2, generator.StaleRemoved);
+    }
+
+    [Fact]
+    public async Task StaleCleanup_IsSkippedWhenTheSyncProducesNoMirrorPaths()
+    {
+        var heat = new RemoteItem { Id = "movie1", Name = "Heat", Type = "Movie", ProductionYear = 1995 };
+
+        await Mirror(heat);
+        var generator = await Mirror(downloadImages: false, removeStaleFiles: true);
+
+        Assert.True(File.Exists(Path.Combine(_root, "Heat (1995)", "Heat (1995).strm")));
+        Assert.Equal(0, generator.StaleRemoved);
+        Assert.Contains(generator.Warnings, w => w.Contains("cleanup skipped", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StaleCleanup_DoesNotTouchSiblingLibraryFolders()
+    {
+        var heat = new RemoteItem { Id = "movie1", Name = "Heat", Type = "Movie", ProductionYear = 1995 };
+        var libraryA = Path.Combine(_root, "libA");
+        var libraryB = Path.Combine(_root, "libB");
+        Directory.CreateDirectory(libraryB);
+        var sibling = Path.Combine(libraryB, "Other (2001).strm");
+        await File.WriteAllTextAsync(sibling, "http://local:8096/elsewhere");
+
+        var generator = new MirrorGenerator(_client, "inst1", "http://local:8096/", downloadImages: false, removeStaleFiles: true, NullLogger.Instance);
+        await generator.GenerateAsync(new[] { heat }, libraryA, CancellationToken.None);
+
+        Assert.True(File.Exists(sibling));
+        Assert.Equal(0, generator.StaleRemoved);
+    }
+
+    private Task<MirrorGenerator> Mirror(params RemoteItem[] items)
+        => Mirror(downloadImages: false, removeStaleFiles: false, items);
+
+    private async Task<MirrorGenerator> Mirror(bool downloadImages, bool removeStaleFiles, params RemoteItem[] items)
+    {
+        var generator = new MirrorGenerator(_client, "inst1", "http://local:8096/", downloadImages, removeStaleFiles, NullLogger.Instance);
         await generator.GenerateAsync(items, _root, CancellationToken.None);
         return generator;
     }

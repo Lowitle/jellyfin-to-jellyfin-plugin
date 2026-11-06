@@ -49,6 +49,13 @@ public class SourceInstance
     public bool DownloadImages { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether mirror files that no longer map to a remote item are deleted
+    /// after a sync. Only generated .strm/.nfo files (and artwork when <see cref="DownloadImages"/> is set)
+    /// inside the mapped library folder are touched, and the pass is skipped when the sync failed.
+    /// </summary>
+    public bool RemoveStaleFiles { get; set; }
+
+    /// <summary>
     /// Gets or sets the mapping of remote libraries to local libraries.
     /// </summary>
     public List<LibraryMapping> Libraries { get; set; } = new();

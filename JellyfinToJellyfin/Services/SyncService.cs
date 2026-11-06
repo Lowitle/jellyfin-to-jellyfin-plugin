@@ -282,7 +282,7 @@ public sealed class SyncService
         var items = result.Items ?? new List<RemoteItem>();
         progress(0.15);
 
-        var generator = new MirrorGenerator(client, instance.Id, localBaseUrl, instance.DownloadImages, _logger);
+        var generator = new MirrorGenerator(client, instance.Id, localBaseUrl, instance.DownloadImages, instance.RemoveStaleFiles, _logger);
         await generator.GenerateAsync(items, libraryDir, cancellationToken).ConfigureAwait(false);
 
         report.Warnings.AddRange(generator.Warnings);
@@ -290,18 +290,20 @@ public sealed class SyncService
         report.NfoWritten += generator.NfoWritten;
         report.ImagesWritten += generator.ImagesWritten;
         report.DuplicatesSkipped += generator.DuplicatesSkipped;
+        report.StaleRemoved += generator.StaleRemoved;
         report.ItemsSeen += items.Count;
         report.LibrariesSynced++;
 
         _logger.LogInformation(
-            "Mirrored {Count} items from '{Remote}' into '{Dir}' ({Strm} strm, {Nfo} nfo, {Images} images, {Duplicates} duplicate paths)",
+            "Mirrored {Count} items from '{Remote}' into '{Dir}' ({Strm} strm, {Nfo} nfo, {Images} images, {Duplicates} duplicate paths, {Stale} stale removed)",
             items.Count,
             remote.Name,
             libraryDir,
             generator.StrmWritten,
             generator.NfoWritten,
             generator.ImagesWritten,
-            generator.DuplicatesSkipped);
+            generator.DuplicatesSkipped,
+            generator.StaleRemoved);
 
         progress(1);
     }

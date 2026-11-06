@@ -22,6 +22,7 @@ public sealed class MirrorGenerator
     private readonly string _instanceId;
     private readonly string _localBaseUrl;
     private readonly bool _downloadImages;
+    private readonly bool _removeStaleFiles;
     private readonly ILogger _logger;
 
     // Tracks every mirror file this run intends to own, so a second source item mapping onto the same
@@ -36,14 +37,21 @@ public sealed class MirrorGenerator
 
     private int _dirRenameWarnings;
 
+    // Items that could not be mirrored because of an exception. A cleanup pass is skipped when this is
+    // non-zero, so a transient remote error never turns into a partially deleted mirror.
+    private int _itemFailures;
+
     private const int MaxDuplicateWarnings = 20;
 
-    public MirrorGenerator(RemoteJellyfinClient client, string instanceId, string localBaseUrl, bool downloadImages, ILogger logger)
+    private static readonly string[] ManagedArtworkExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
+
+    public MirrorGenerator(RemoteJellyfinClient client, string instanceId, string localBaseUrl, bool downloadImages, bool removeStaleFiles, ILogger logger)
     {
         _client = client;
         _instanceId = instanceId;
         _localBaseUrl = RemoteJellyfinClient.NormalizeBaseUrl(localBaseUrl);
         _downloadImages = downloadImages;
+        _removeStaleFiles = removeStaleFiles;
         _logger = logger;
     }
 
@@ -52,6 +60,9 @@ public sealed class MirrorGenerator
     public int NfoWritten { get; private set; }
 
     public int ImagesWritten { get; private set; }
+
+    /// <summary>Gets the number of mirror files that no longer map to a remote item and were deleted.</summary>
+    public int StaleRemoved { get; private set; }
 
     /// <summary>Gets the number of source items that mapped onto a mirror file another item already produced.</summary>
     public int DuplicatesSkipped { get; private set; }
@@ -78,6 +89,11 @@ public sealed class MirrorGenerator
         foreach (var root in roots)
         {
             await GenerateItemAsync(root, libraryDir, null, childrenByParent, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (_removeStaleFiles)
+        {
+            RemoveStaleFiles(libraryDir, items.Count, cancellationToken);
         }
     }
 
@@ -177,6 +193,7 @@ public sealed class MirrorGenerator
         }
         catch (Exception ex)
         {
+            _itemFailures++;
             Warnings.Add($"Item '{item.Name}' ({item.Type}): {ex.Message}");
             _logger.LogWarning(ex, "Failed to mirror remote item {Name} ({Type})", item.Name, item.Type);
         }
@@ -380,7 +397,8 @@ public sealed class MirrorGenerator
     /// </summary>
     private bool ClaimPath(string path)
     {
-        if (_targetPaths.Add(path))
+        var fullPath = Path.GetFullPath(path);
+        if (_targetPaths.Add(fullPath))
         {
             return true;
         }
@@ -397,6 +415,124 @@ public sealed class MirrorGenerator
 
         _logger.LogDebug("Skipped duplicate mirror path {Path}", path);
         return false;
+    }
+
+    /// <summary>
+    /// Deletes mirror files that no longer map to a remote item. The pass only runs when the sync produced
+    /// mirror paths and no item failed, so an empty or partial listing can never wipe an existing mirror, and
+    /// it only touches files this plugin generates (.strm/.nfo, plus artwork when image download is enabled).
+    /// </summary>
+    /// <param name="libraryDir">Mapped library folder that was just regenerated.</param>
+    /// <param name="itemsSeen">Number of source items in the listing that produced this mirror.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private void RemoveStaleFiles(string libraryDir, int itemsSeen, CancellationToken ct)
+    {
+        if (itemsSeen == 0 || _targetPaths.Count == 0)
+        {
+            Warnings.Add("Stale file cleanup skipped: the sync produced no mirror paths, so nothing is removed.");
+            return;
+        }
+
+        if (_itemFailures > 0)
+        {
+            Warnings.Add($"Stale file cleanup skipped: {_itemFailures} item(s) failed to mirror.");
+            return;
+        }
+
+        string root;
+        try
+        {
+            root = Path.GetFullPath(libraryDir);
+        }
+        catch (Exception ex)
+        {
+            Warnings.Add($"Stale file cleanup skipped for '{libraryDir}': {ex.Message}");
+            return;
+        }
+
+        if (!Directory.Exists(root))
+        {
+            return;
+        }
+
+        List<string> directories;
+        List<string> files;
+        try
+        {
+            directories = Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories).ToList();
+            files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).ToList();
+        }
+        catch (Exception ex)
+        {
+            Warnings.Add($"Stale file cleanup skipped for '{root}': {ex.Message}");
+            return;
+        }
+
+        var rootPrefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
+
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var fullPath = Path.GetFullPath(file);
+
+            // Defence in depth: never delete outside the mapped library folder, whatever the enumeration returned.
+            if (!fullPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
+                || _targetPaths.Contains(fullPath)
+                || !IsManagedMirrorFile(fullPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(fullPath);
+                StaleRemoved++;
+            }
+            catch (Exception ex)
+            {
+                Warnings.Add($"Could not remove stale mirror file '{fullPath}': {ex.Message}");
+            }
+        }
+
+        // Deepest first, so a folder that just lost its last file is removed in the same pass.
+        foreach (var directory in directories.OrderByDescending(d => d.Length))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory);
+                }
+            }
+            catch (IOException)
+            {
+                // Still in use (a player or the library scan); the next sync retries.
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Warnings.Add($"Could not remove empty mirror folder '{directory}': {ex.Message}");
+            }
+        }
+
+        if (StaleRemoved > 0)
+        {
+            _logger.LogInformation("Removed {Count} stale mirror file(s) under {Dir}", StaleRemoved, root);
+        }
+    }
+
+    private bool IsManagedMirrorFile(string path)
+    {
+        var extension = Path.GetExtension(path);
+        if (string.Equals(extension, ".strm", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".nfo", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return _downloadImages && ManagedArtworkExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
 
     private static async Task<bool> ContentMatchesAsync(string path, string content, CancellationToken ct)
@@ -423,7 +559,16 @@ public sealed class MirrorGenerator
 
     private async Task TryWriteImageAsync(RemoteItem item, string imageType, string targetPath, int maxWidth, CancellationToken ct)
     {
-        if (!_downloadImages || string.IsNullOrEmpty(item.Id) || !HasImage(item, imageType))
+        if (!_downloadImages || string.IsNullOrEmpty(item.Id))
+        {
+            return;
+        }
+
+        // Claim the path even when the source has no such image, so a later cleanup pass can drop a file
+        // this mirror wrote when the artwork disappeared upstream.
+        _targetPaths.Add(Path.GetFullPath(targetPath));
+
+        if (!HasImage(item, imageType))
         {
             return;
         }
