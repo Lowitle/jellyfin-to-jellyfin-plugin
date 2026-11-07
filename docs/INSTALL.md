@@ -191,3 +191,15 @@ directly skips the reverse proxy, which would otherwise present a certificate na
 host and not the tailnet address. If you want HTTPS anyway, `tailscale serve https / http://127.0.0.1:8096`
 on the source gives a valid `https://<host>.<tailnet>.ts.net` name. A self-hosted WireGuard, a NAS
 VPN or ZeroTier works the same way with their own addresses.
+
+Running Jellyfin in an LXC container on Proxmox? The cheapest path is Tailscale on the node, not in
+the container: install it on the Proxmox host, then let the container's traffic to the tailnet be
+forwarded and masqueraded (`net.ipv4.ip_forward=1` plus
+`iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE`). The container needs no changes:
+`BaseUrl` becomes the source's tailnet address, and if the source advertises its own LAN subnet as a
+subnet route, its plain LAN address works too. Installing Tailscale *inside* the LXC also works but
+needs the TUN device: `modprobe tun` on the node (and `tun` in `/etc/modules`), then in
+`/etc/pve/lxc/<id>.conf` the device allow rule (`lxc.cgroup2.devices.allow: c 10:200 rwm`), the bind
+mount (`lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file`) and `net_admin`/`net_raw`
+removed from `lxc.cap.drop`. Tailscale's userspace mode is not a substitute here: it only offers a
+SOCKS/HTTP proxy, and the plugin dials the source directly.
